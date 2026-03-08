@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "Auto Register Filler",
+  "version": "1.2.0",
+  "description": "自动填充注册表单，并使用通义千问为当前网站生成推广文案。",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://dashscope.aliyuncs.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Auto Register Filler - 网站自动填表与推广文案助手"
+  },
+  "options_page": "options.html",
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
+
+

@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Auto Register Filler 设置</title>
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu,
+          Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+        margin: 0;
+        padding: 24px;
+        background-color: #f5f5f7;
+        color: #1f1f1f;
+      }
+
+      .container {
+        max-width: 640px;
+        margin: 0 auto;
+        background: #ffffff;
+        border-radius: 12px;
+        box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+        padding: 24px 28px 28px;
+      }
+
+      h1 {
+        font-size: 20px;
+        margin: 0 0 4px;
+      }
+
+      .subtitle {
+        font-size: 13px;
+        color: #6b7280;
+        margin-bottom: 20px;
+      }
+
+      label {
+        display: block;
+        font-size: 13px;
+        font-weight: 600;
+        margin-bottom: 6px;
+        color: #374151;
+      }
+
+      input[type='password'] {
+        width: 100%;
+        padding: 10px 12px;
+        border-radius: 8px;
+        border: 1px solid #d1d5db;
+        font-size: 13px;
+        box-sizing: border-box;
+        outline: none;
+        transition: border-color 0.15s ease, box-shadow 0.15s ease;
+      }
+
+      input[type='password']:focus {
+        border-color: #2563eb;
+        box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.15);
+      }
+
+      .hint {
+        font-size: 12px;
+        color: #6b7280;
+        margin-top: 6px;
+        line-height: 1.5;
+      }
+
+      .row {
+        display: flex;
+        align-items: center;
+        margin-top: 10px;
+        gap: 8px;
+      }
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 8px 14px;
+        border-radius: 999px;
+        border: none;
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 500;
+        transition: background-color 0.15s ease, box-shadow 0.15s ease, transform 0.05s ease;
+      }
+
+      .btn-primary {
+        background: linear-gradient(135deg, #2563eb, #1d4ed8);
+        color: #ffffff;
+        box-shadow: 0 8px 18px rgba(37, 99, 235, 0.25);
+      }
+
+      .btn-primary:hover {
+        background: linear-gradient(135deg, #1d4ed8, #1e40af);
+        transform: translateY(-0.5px);
+        box-shadow: 0 10px 24px rgba(37, 99, 235, 0.32);
+      }
+
+      .btn-secondary {
+        background: #f3f4f6;
+        color: #374151;
+        border: 1px solid #e5e7eb;
+      }
+
+      .btn-secondary:hover {
+        background: #e5e7eb;
+      }
+
+      .status {
+        font-size: 12px;
+        color: #059669;
+        opacity: 0;
+        transition: opacity 0.15s ease;
+      }
+
+      .status.visible {
+        opacity: 1;
+      }
+
+      .danger {
+        color: #dc2626;
+      }
+
+      .footer {
+        margin-top: 22px;
+        font-size: 11px;
+        color: #9ca3af;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Auto Register Filler 设置</h1>
+      <div class="subtitle">
+        在这里安全地保存你的 DashScope / 通义千问 API Key，并自定义网站推广 Skill 语言模板。
+      </div>
+
+      <div>
+        <label for="apiKey">DashScope / 通义千问 API Key</label>
+        <input type="password" id="apiKey" placeholder="sk-..." autocomplete="off" />
+        <div class="hint">
+          - 只保存在浏览器的
+          <strong>chrome.storage.sync</strong>
+          中，本扩展不会上传到任何第三方服务器。<br />
+          - 修改后，重新打开页面或重新触发右键菜单即可生效。
+        </div>
+      </div>
+
+      <div style="margin-top: 20px">
+        <label for="skillTemplate">通义千问 Skill 语言模板（system 提示词）</label>
+        <textarea
+          id="skillTemplate"
+          rows="10"
+          style="
+            width: 100%;
+            padding: 10px 12px;
+            border-radius: 8px;
+            border: 1px solid #d1d5db;
+            font-size: 13px;
+            box-sizing: border-box;
+            outline: none;
+            resize: vertical;
+          "
+        ></textarea>
+        <div class="hint">
+          - 支持多行文本，将作为调用通义千问时的 <strong>system</strong> 提示词。<br />
+          - 为空时会使用扩展内置的默认模板；修改后立即生效。
+        </div>
+      </div>
+
+      <div class="row">
+        <button id="saveBtn" class="btn btn-primary">保存</button>
+        <button id="clearBtn" class="btn btn-secondary">清空 API Key</button>
+        <span id="status" class="status">已保存</span>
+      </div>
+
+      <div class="footer">
+        如果频繁调用接口，请注意控制频率和用量，避免不必要的费用。
+        <span class="danger">请勿在公共电脑上保存你的 API Key。</span>
+      </div>
+    </div>
+
+    <script src="options.js"></script>
+  </body>
+  </html>
+

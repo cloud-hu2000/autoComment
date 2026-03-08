@@ -1,0 +1,470 @@
+(function () {
+  // ====== 原有自动填表功能 ======
+  const EMAIL = 'cloudhu2000@gmail.com';
+  const PASSWORD = 'zxcvbnm,./123';
+  const USERNAME = 'CloudHu';
+
+  function fillInputs() {
+    const allInputs = Array.from(document.querySelectorAll('input'));
+
+    // 填邮箱
+    const emailCandidates = allInputs.filter((input) => {
+      const type = (input.type || '').toLowerCase();
+      const name = (input.name || '').toLowerCase();
+      const id = (input.id || '').toLowerCase();
+      const placeholder = (input.placeholder || '').toLowerCase();
+
+      if (type === 'email') return true;
+
+      const keywords = ['email', 'e-mail', 'mail'];
+      return keywords.some((k) => name.includes(k) || id.includes(k) || placeholder.includes(k));
+    });
+
+    if (emailCandidates.length > 0) {
+      const emailInput = emailCandidates[0];
+      setValue(emailInput, EMAIL);
+    }
+
+    // 填用户名（尽量匹配“用户名 / 账号 / 昵称 / login / username”等字段）
+    const usernameCandidates = allInputs.filter((input) => {
+      const type = (input.type || '').toLowerCase();
+      // 排除明显不是用户名的字段
+      if (type === 'email' || type === 'password' || type === 'checkbox' || type === 'radio') {
+        return false;
+      }
+
+      const name = (input.name || '').toLowerCase();
+      const id = (input.id || '').toLowerCase();
+      const placeholder = (input.placeholder || '').toLowerCase();
+      const text = `${name} ${id} ${placeholder}`;
+
+      const keywords = [
+        'user',
+        'username',
+        'account',
+        'login',
+        'nick',
+        'nickname',
+        'handle',
+        '用户名',
+        '账号',
+        '帐户',
+        '登录名',
+        '昵称'
+      ];
+
+      return keywords.some((k) => text.includes(k));
+    });
+
+    if (usernameCandidates.length > 0) {
+      const usernameInput = usernameCandidates[0];
+      setValue(usernameInput, USERNAME);
+    }
+
+    // 填密码（通常有两个：密码和确认密码）
+    const passwordInputs = allInputs.filter(
+      (input) => (input.type || '').toLowerCase() === 'password'
+    );
+
+    if (passwordInputs.length > 0) {
+      passwordInputs.forEach((input) => {
+        setValue(input, PASSWORD);
+      });
+    }
+  }
+
+  function setValue(input, value) {
+    // 避免被框架拦截，触发原生 setter + 事件
+    const descriptor = Object.getOwnPropertyDescriptor(
+      Object.getPrototypeOf(input),
+      'value'
+    );
+    if (descriptor && descriptor.set) {
+      descriptor.set.call(input, value);
+    } else {
+      input.value = value;
+    }
+
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  // 初次加载（仅在页面打开/刷新时自动填表一次）
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', fillInputs);
+  } else {
+    fillInputs();
+  }
+
+  // ====== 通义千问：网站推广 Skill 与调用 ======
+  // API Key / Skill 模板都从 chrome.storage.sync 中读取，不在代码中硬编码
+  const API_KEY_STORAGE_KEY = 'dashscope_api_key';
+  const SKILL_TEMPLATE_STORAGE_KEY = 'qwen_skill_template';
+
+  // 默认 Skill 语言模板（当 storage 中没有用户自定义模板时使用）
+  const DEFAULT_QWEN_SKILL_TEMPLATE = [
+    '你是一个资深的网站营销与文案专家，擅长为各类网站撰写高转化率的推广文案。',
+    '请严格根据我提供的“当前网站内容”进行分析和创作，不要凭空捏造网站不存在的功能或信息。',
+    '',
+    '【输出要求】',
+    '1. 先用 1–2 句话高度概括该网站的核心价值和目标用户。',
+    '2. 我需要在该网站发表评论，关联到我的网站并吸引用户点击访问我的网站。',
+    '3. 语气可以专业但要自然、真实，避免夸张、虚假宣传。',
+    '4. 使用英文输出，字数建议控制在 100-200词。'
+  ].join('\n');
+
+  // 从 chrome.storage.sync 中异步获取 DashScope / 通义千问 API Key
+  function getDashScopeApiKey() {
+    return new Promise((resolve) => {
+      if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.sync) {
+        resolve('');
+        return;
+      }
+      chrome.storage.sync.get([API_KEY_STORAGE_KEY], (result) => {
+        if (chrome.runtime && chrome.runtime.lastError) {
+          console.error('读取 DashScope API Key 失败：', chrome.runtime.lastError);
+          resolve('');
+          return;
+        }
+        const key =
+          result && typeof result[API_KEY_STORAGE_KEY] === 'string'
+            ? result[API_KEY_STORAGE_KEY]
+            : '';
+        resolve(key.trim());
+      });
+    });
+  }
+
+  // 从 chrome.storage.sync 中异步获取 Skill 模板（如果为空则回落到默认模板）
+  function getQwenSkillTemplate() {
+    return new Promise((resolve) => {
+      if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.sync) {
+        resolve(DEFAULT_QWEN_SKILL_TEMPLATE);
+        return;
+      }
+      chrome.storage.sync.get([SKILL_TEMPLATE_STORAGE_KEY], (result) => {
+        if (chrome.runtime && chrome.runtime.lastError) {
+          console.error('读取 Skill 模板失败：', chrome.runtime.lastError);
+          resolve(DEFAULT_QWEN_SKILL_TEMPLATE);
+          return;
+        }
+        const tpl =
+          result && typeof result[SKILL_TEMPLATE_STORAGE_KEY] === 'string'
+            ? result[SKILL_TEMPLATE_STORAGE_KEY].trim()
+            : '';
+        if (!tpl) {
+          resolve(DEFAULT_QWEN_SKILL_TEMPLATE);
+        } else {
+          resolve(tpl);
+        }
+      });
+    });
+  }
+
+  // 收集当前页面内容 + 调用通义千问生成推广文案（仅负责返回文本，不做 UI 交互）
+  async function generatePromotionCopyWithQwen() {
+    const DASHSCOPE_API_KEY = await getDashScopeApiKey();
+    const QWEN_SKILL_TEMPLATE = await getQwenSkillTemplate();
+
+    if (!DASHSCOPE_API_KEY) {
+      throw new Error(
+        '尚未配置 DashScope / 通义千问 API Key，请打开扩展的“选项/设置”页面填写 API Key。'
+      );
+    }
+
+    const websiteUrl = window.location.href || '';
+    const title = document.title || '';
+    const descriptionMeta =
+      document.querySelector('meta[name="description"]') ||
+      document.querySelector('meta[name="Description"]');
+    const description = descriptionMeta ? descriptionMeta.content || '' : '';
+
+    let bodyText = '';
+    if (document.body) {
+      bodyText = document.body.innerText || '';
+      // 简单清洗、截断，避免内容过长
+      bodyText = bodyText.replace(/\s+/g, ' ').trim();
+      const MAX_LEN = 4000;
+      if (bodyText.length > MAX_LEN) {
+        bodyText = bodyText.slice(0, MAX_LEN) + ' ...（内容已截断）';
+      }
+    }
+
+    const websiteContent = [
+      `【网站标题】${title}`,
+      `【网站 URL】${websiteUrl}`,
+      description ? `【网站描述】${description}` : '',
+      '【页面正文节选】',
+      bodyText || '（当前页面正文内容为空或无法提取）'
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    const userPrompt = [
+      '下面是当前网站的内容，请根据 Skill 模板的要求，为该网站生成一份推广文案：',
+      '',
+      websiteContent
+    ].join('\n');
+
+    // 调用 DashScope / 通义千问（OpenAI 兼容模式）
+    const apiUrl = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
+
+    const requestBody = {
+      model: 'qwen-plus',
+      messages: [
+        { role: 'system', content: QWEN_SKILL_TEMPLATE },
+        { role: 'user', content: userPrompt }
+      ]
+    };
+
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${DASHSCOPE_API_KEY}`
+      },
+      body: JSON.stringify(requestBody)
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('DashScope API 响应异常：', response.status, errorText);
+      throw new Error('通义千问接口调用失败，具体信息请查看控制台。');
+    }
+
+    const data = await response.json();
+
+    const aiText =
+      data &&
+      data.choices &&
+      data.choices[0] &&
+      data.choices[0].message &&
+      data.choices[0].message.content
+        ? data.choices[0].message.content
+        : '未能从通义千问响应中解析出文案内容。';
+
+    console.log('通义千问生成的网站推广文案：\n', aiText);
+    return aiText;
+  }
+
+  // ====== 页面内浮动窗口 UI：AI 生成推广文案 + 一键复制 ======
+
+  let qwenPanelEl = null;
+
+  function createOrToggleQwenPanel() {
+    if (qwenPanelEl && qwenPanelEl.parentNode) {
+      qwenPanelEl.parentNode.removeChild(qwenPanelEl);
+      qwenPanelEl = null;
+      return;
+    }
+
+    const panel = document.createElement('div');
+    panel.id = 'auto-register-qwen-panel';
+    panel.style.position = 'fixed';
+    panel.style.right = '24px';
+    panel.style.bottom = '24px';
+    panel.style.width = '360px';
+    panel.style.maxWidth = '80vw';
+    panel.style.maxHeight = '60vh';
+    panel.style.zIndex = '2147483647';
+    panel.style.background = 'rgba(15,23,42,0.97)';
+    panel.style.color = '#e5e7eb';
+    panel.style.borderRadius = '12px';
+    panel.style.boxShadow = '0 18px 45px rgba(15,23,42,0.55)';
+    panel.style.backdropFilter = 'blur(14px)';
+    panel.style.fontFamily =
+      "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,Cantarell,'Open Sans','Helvetica Neue',sans-serif";
+    panel.style.display = 'flex';
+    panel.style.flexDirection = 'column';
+    panel.style.overflow = 'hidden';
+
+    const header = document.createElement('div');
+    header.style.display = 'flex';
+    header.style.alignItems = 'center';
+    header.style.justifyContent = 'space-between';
+    header.style.padding = '10px 14px';
+    header.style.borderBottom = '1px solid rgba(148,163,184,0.25)';
+    header.style.fontSize = '13px';
+    header.style.fontWeight = '600';
+    header.textContent = '通义千问 · 网站推广助手';
+
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = '×';
+    closeBtn.style.border = 'none';
+    closeBtn.style.background = 'transparent';
+    closeBtn.style.color = '#9ca3af';
+    closeBtn.style.cursor = 'pointer';
+    closeBtn.style.fontSize = '16px';
+    closeBtn.style.lineHeight = '1';
+    closeBtn.style.padding = '2px 4px';
+    closeBtn.addEventListener('mouseenter', () => {
+      closeBtn.style.color = '#e5e7eb';
+    });
+    closeBtn.addEventListener('mouseleave', () => {
+      closeBtn.style.color = '#9ca3af';
+    });
+    closeBtn.addEventListener('click', () => {
+      if (panel.parentNode) {
+        panel.parentNode.removeChild(panel);
+      }
+      qwenPanelEl = null;
+    });
+
+    header.appendChild(closeBtn);
+
+    const body = document.createElement('div');
+    body.style.padding = '10px 12px 12px';
+    body.style.display = 'flex';
+    body.style.flexDirection = 'column';
+    body.style.gap = '8px';
+    body.style.fontSize = '12px';
+
+    const hint = document.createElement('div');
+    hint.textContent = '基于当前网页内容，使用通义千问一键生成英文推广文案。';
+    hint.style.color = '#9ca3af';
+    hint.style.lineHeight = '1.4';
+
+    const btnRow = document.createElement('div');
+    btnRow.style.display = 'flex';
+    btnRow.style.alignItems = 'center';
+    btnRow.style.gap = '8px';
+
+    const generateBtn = document.createElement('button');
+    generateBtn.textContent = 'AI生成推广文案';
+    generateBtn.style.flex = '1';
+    generateBtn.style.border = 'none';
+    generateBtn.style.borderRadius = '999px';
+    generateBtn.style.padding = '7px 12px';
+    generateBtn.style.fontSize = '12px';
+    generateBtn.style.fontWeight = '500';
+    generateBtn.style.cursor = 'pointer';
+    generateBtn.style.background =
+      'linear-gradient(135deg, #2563eb, #4f46e5)';
+    generateBtn.style.color = '#f9fafb';
+    generateBtn.style.boxShadow = '0 10px 24px rgba(37,99,235,0.45)';
+    generateBtn.addEventListener('mouseenter', () => {
+      generateBtn.style.filter = 'brightness(1.05)';
+    });
+    generateBtn.addEventListener('mouseleave', () => {
+      generateBtn.style.filter = 'none';
+    });
+
+    const copyBtn = document.createElement('button');
+    copyBtn.textContent = '复制文案';
+    copyBtn.style.border = 'none';
+    copyBtn.style.borderRadius = '999px';
+    copyBtn.style.padding = '7px 10px';
+    copyBtn.style.fontSize = '12px';
+    copyBtn.style.cursor = 'pointer';
+    copyBtn.style.background = 'rgba(15,23,42,0.8)';
+    copyBtn.style.color = '#e5e7eb';
+    copyBtn.style.border = '1px solid rgba(148,163,184,0.6)';
+    copyBtn.disabled = true;
+    copyBtn.style.opacity = '0.55';
+
+    const statusEl = document.createElement('div');
+    statusEl.style.minHeight = '16px';
+    statusEl.style.fontSize = '11px';
+    statusEl.style.color = '#9ca3af';
+
+    const textarea = document.createElement('textarea');
+    textarea.readOnly = true;
+    textarea.style.width = '100%';
+    textarea.style.flex = '1';
+    textarea.style.minHeight = '120px';
+    textarea.style.maxHeight = '220px';
+    textarea.style.borderRadius = '8px';
+    textarea.style.border = '1px solid rgba(148,163,184,0.6)';
+    textarea.style.background = 'rgba(15,23,42,0.85)';
+    textarea.style.color = '#e5e7eb';
+    textarea.style.fontSize = '12px';
+    textarea.style.fontFamily = "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace";
+    textarea.style.padding = '8px 9px';
+    textarea.style.boxSizing = 'border-box';
+    textarea.style.resize = 'vertical';
+
+    btnRow.appendChild(generateBtn);
+    btnRow.appendChild(copyBtn);
+
+    body.appendChild(hint);
+    body.appendChild(btnRow);
+    body.appendChild(statusEl);
+    body.appendChild(textarea);
+
+    panel.appendChild(header);
+    panel.appendChild(body);
+
+    document.documentElement.appendChild(panel);
+    qwenPanelEl = panel;
+
+    function setStatus(text, color) {
+      statusEl.textContent = text || '';
+      if (color) {
+        statusEl.style.color = color;
+      }
+    }
+
+    function setCopyEnabled(enabled) {
+      copyBtn.disabled = !enabled;
+      copyBtn.style.opacity = enabled ? '1' : '0.55';
+    }
+
+    generateBtn.addEventListener('click', async () => {
+      setStatus('正在调用通义千问生成推广文案，请稍候…', '#9ca3af');
+      textarea.value = '';
+      setCopyEnabled(false);
+      generateBtn.disabled = true;
+      generateBtn.style.opacity = '0.7';
+      try {
+        const text = await generatePromotionCopyWithQwen();
+        textarea.value = text;
+        setStatus('生成完成，可以复制使用。', '#22c55e');
+        setCopyEnabled(true);
+      } catch (err) {
+        console.error('调用通义千问生成推广文案失败：', err);
+        const msg =
+          (err && err.message) ||
+          '调用通义千问失败，请检查控制台日志或 API Key 配置。';
+        setStatus(msg, '#f97373');
+        setCopyEnabled(false);
+      } finally {
+        generateBtn.disabled = false;
+        generateBtn.style.opacity = '1';
+      }
+    });
+
+    copyBtn.addEventListener('click', async () => {
+      const text = textarea.value.trim();
+      if (!text) return;
+
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(text);
+        } else {
+          const temp = document.createElement('textarea');
+          temp.value = text;
+          temp.style.position = 'fixed';
+          temp.style.left = '-9999px';
+          document.body.appendChild(temp);
+          temp.select();
+          document.execCommand('copy');
+          document.body.removeChild(temp);
+        }
+        setStatus('文案已复制到剪贴板。', '#22c55e');
+      } catch (err) {
+        console.error('复制文案失败：', err);
+        setStatus('复制失败，请手动选择文本复制。', '#f97373');
+      }
+    });
+  }
+
+  // 监听 background.js 中点击扩展图标发送的消息，打开/关闭浮动窗口
+  if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
+    chrome.runtime.onMessage.addListener((message, _sender, _sendResponse) => {
+      if (message && message.type === 'TOGGLE_PROMOTE_WITH_QWEN_PANEL') {
+        createOrToggleQwenPanel();
+      }
+    });
+  }
+})();
+
