@@ -3,16 +3,32 @@
 const API_KEY_STORAGE_KEY = 'dashscope_api_key';
 const SKILL_TEMPLATE_STORAGE_KEY = 'qwen_skill_template';
 const WEBSITE_URL_STORAGE_KEY = 'promotion_website_url';
+const AUTO_OPEN_QWEN_PANEL_KEY = 'auto_open_qwen_panel';
+const USER_NAME_STORAGE_KEY = 'auto_fill_user_name';
+const USER_EMAIL_STORAGE_KEY = 'auto_fill_user_email';
 
 document.addEventListener('DOMContentLoaded', () => {
   const apiKeyInput = document.getElementById('apiKey');
   const skillTemplateInput = document.getElementById('skillTemplate');
   const websiteUrlInput = document.getElementById('websiteUrl');
+  const autoOpenPanelCheckbox = document.getElementById('autoOpenPanel');
+  const userNameInput = document.getElementById('userName');
+  const userEmailInput = document.getElementById('userEmail');
   const saveBtn = document.getElementById('saveBtn');
   const clearBtn = document.getElementById('clearBtn');
   const statusEl = document.getElementById('status');
 
-  if (!apiKeyInput || !skillTemplateInput || !websiteUrlInput || !saveBtn || !clearBtn || !statusEl) {
+  if (
+    !apiKeyInput ||
+    !skillTemplateInput ||
+    !websiteUrlInput ||
+    !autoOpenPanelCheckbox ||
+    !userNameInput ||
+    !userEmailInput ||
+    !saveBtn ||
+    !clearBtn ||
+    !statusEl
+  ) {
     console.error('Options page 初始化失败：元素未找到');
     return;
   }
@@ -30,12 +46,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 初始化时从 chrome.storage.sync 读取
   chrome.storage.sync.get(
-    [API_KEY_STORAGE_KEY, SKILL_TEMPLATE_STORAGE_KEY, WEBSITE_URL_STORAGE_KEY],
+    [
+      API_KEY_STORAGE_KEY,
+      SKILL_TEMPLATE_STORAGE_KEY,
+      WEBSITE_URL_STORAGE_KEY,
+      AUTO_OPEN_QWEN_PANEL_KEY,
+      USER_NAME_STORAGE_KEY,
+      USER_EMAIL_STORAGE_KEY
+    ],
     (result) => {
-    if (chrome.runtime.lastError) {
-      console.error('读取设置失败：', chrome.runtime.lastError);
-      return;
-    }
+      if (chrome.runtime.lastError) {
+        console.error('读取设置失败：', chrome.runtime.lastError);
+        return;
+      }
       if (result && typeof result[API_KEY_STORAGE_KEY] === 'string') {
         apiKeyInput.value = result[API_KEY_STORAGE_KEY];
       }
@@ -47,6 +70,18 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       if (result && typeof result[WEBSITE_URL_STORAGE_KEY] === 'string') {
         websiteUrlInput.value = result[WEBSITE_URL_STORAGE_KEY];
+      }
+      if (result && typeof result[AUTO_OPEN_QWEN_PANEL_KEY] === 'boolean') {
+        autoOpenPanelCheckbox.checked = result[AUTO_OPEN_QWEN_PANEL_KEY];
+      } else {
+        // 默认开启自动打开浮动窗口
+        autoOpenPanelCheckbox.checked = true;
+      }
+      if (result && typeof result[USER_NAME_STORAGE_KEY] === 'string') {
+        userNameInput.value = result[USER_NAME_STORAGE_KEY];
+      }
+      if (result && typeof result[USER_EMAIL_STORAGE_KEY] === 'string') {
+        userEmailInput.value = result[USER_EMAIL_STORAGE_KEY];
       }
     }
   );
@@ -66,12 +101,18 @@ document.addEventListener('DOMContentLoaded', () => {
     const key = apiKeyInput.value.trim();
     const skillTemplate = skillTemplateInput.value.trim();
     const websiteUrl = websiteUrlInput.value.trim();
+    const autoOpenPanel = !!autoOpenPanelCheckbox.checked;
+    const userName = userNameInput.value.trim();
+    const userEmail = userEmailInput.value.trim();
 
     chrome.storage.sync.set(
       {
         [API_KEY_STORAGE_KEY]: key,
         [SKILL_TEMPLATE_STORAGE_KEY]: skillTemplate,
-        [WEBSITE_URL_STORAGE_KEY]: websiteUrl
+        [WEBSITE_URL_STORAGE_KEY]: websiteUrl,
+        [AUTO_OPEN_QWEN_PANEL_KEY]: autoOpenPanel,
+        [USER_NAME_STORAGE_KEY]: userName,
+        [USER_EMAIL_STORAGE_KEY]: userEmail
       },
       () => {
         if (chrome.runtime.lastError) {

@@ -1,11 +1,14 @@
 (function () {
   // ====== 原有自动填表功能 ======
-  const EMAIL = 'cloudhu2000@gmail.com';
-  const PASSWORD = 'zxcvbnm,./123';
-  const USERNAME = 'CloudHu';
+  const DEFAULT_EMAIL = 'cloudhu2000@gmail.com';
+  const DEFAULT_PASSWORD = 'zxcvbnm,./123';
+  const DEFAULT_USERNAME = 'CloudHu';
 
   async function fillInputs() {
     const WEBSITE = await getWebsiteUrl();
+    const userProfile = await getUserProfile();
+    const EMAIL = userProfile.email;
+    const USERNAME = userProfile.name;
     const allInputs = Array.from(document.querySelectorAll('input'));
     const allTextareas = Array.from(document.querySelectorAll('textarea'));
 
@@ -240,6 +243,9 @@
   const API_KEY_STORAGE_KEY = 'dashscope_api_key';
   const SKILL_TEMPLATE_STORAGE_KEY = 'qwen_skill_template';
   const WEBSITE_URL_STORAGE_KEY = 'promotion_website_url';
+  const AUTO_OPEN_QWEN_PANEL_KEY = 'auto_open_qwen_panel';
+  const USER_NAME_STORAGE_KEY = 'auto_fill_user_name';
+  const USER_EMAIL_STORAGE_KEY = 'auto_fill_user_email';
 
   // 默认 Skill 语言模板（当 storage 中没有用户自定义模板时使用）
   const DEFAULT_QWEN_SKILL_TEMPLATE = [
@@ -323,11 +329,78 @@
     });
   }
 
-  // 初次加载（仅在页面打开/刷新时自动填表一次）
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', fillInputs);
-  } else {
+  // 从 chrome.storage.sync 中异步获取用户的姓名和邮箱，用于自动填表
+  // 如果为空或读取失败，则回退到扩展内置的默认姓名 / 邮箱
+  function getUserProfile() {
+    return new Promise((resolve) => {
+      if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.sync) {
+        resolve({ name: DEFAULT_USERNAME, email: DEFAULT_EMAIL });
+        return;
+      }
+      chrome.storage.sync.get([USER_NAME_STORAGE_KEY, USER_EMAIL_STORAGE_KEY], (result) => {
+        if (chrome.runtime && chrome.runtime.lastError) {
+          console.error('读取用户姓名/邮箱失败：', chrome.runtime.lastError);
+          resolve({ name: DEFAULT_USERNAME, email: DEFAULT_EMAIL });
+          return;
+        }
+        let name =
+          result && typeof result[USER_NAME_STORAGE_KEY] === 'string'
+            ? result[USER_NAME_STORAGE_KEY].trim()
+            : '';
+        let email =
+          result && typeof result[USER_EMAIL_STORAGE_KEY] === 'string'
+            ? result[USER_EMAIL_STORAGE_KEY].trim()
+            : '';
+
+        if (!name) {
+          name = DEFAULT_USERNAME;
+        }
+        if (!email) {
+          email = DEFAULT_EMAIL;
+        }
+
+        resolve({ name, email });
+      });
+    });
+  }
+
+  // 从 chrome.storage.sync 中异步获取“是否自动打开浮动窗口”的设置
+  // 默认值：true（即未设置或读取失败时，视为开启自动打开）
+  function getAutoOpenQwenPanelSetting() {
+    return new Promise((resolve) => {
+      if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.sync) {
+        resolve(true);
+        return;
+      }
+      chrome.storage.sync.get([AUTO_OPEN_QWEN_PANEL_KEY], (result) => {
+        if (chrome.runtime && chrome.runtime.lastError) {
+          console.error('读取自动打开浮动窗口设置失败：', chrome.runtime.lastError);
+          resolve(true);
+          return;
+        }
+        if (!result || typeof result[AUTO_OPEN_QWEN_PANEL_KEY] === 'undefined') {
+          resolve(true);
+          return;
+        }
+        resolve(Boolean(result[AUTO_OPEN_QWEN_PANEL_KEY]));
+      });
+    });
+  }
+
+  // 初次加载（仅在页面打开/刷新时自动填表一次，并根据设置决定是否自动打开浮动窗口）
+  function initOnPageReady() {
     fillInputs();
+    getAutoOpenQwenPanelSetting().then((shouldOpen) => {
+      if (shouldOpen) {
+        createOrToggleQwenPanel();
+      }
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initOnPageReady);
+  } else {
+    initOnPageReady();
   }
 
   // 收集当前页面内容 + 调用通义千问生成推广文案（仅负责返回文本，不做 UI 交互）

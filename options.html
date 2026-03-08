@@ -43,7 +43,8 @@
 
       input[type='password'],
       input[type='text'],
-      input[type='url'] {
+      input[type='url'],
+      input[type='email'] {
         width: 100%;
         padding: 10px 12px;
         border-radius: 8px;
@@ -56,7 +57,8 @@
 
       input[type='password']:focus,
       input[type='text']:focus,
-      input[type='url']:focus {
+      input[type='url']:focus,
+      input[type='email']:focus {
         border-color: #2563eb;
         box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.15);
       }
@@ -183,6 +185,46 @@
         <div class="hint">
           - 在评论表单中自动填充到 Website / URL / 网址 字段。<br />
           - 为空时不会自动填 Website 字段。
+        </div>
+      </div>
+
+      <div style="margin-top: 20px">
+        <label>自动填表的个人信息（注册 / 评论表单）</label>
+        <div style="display: flex; gap: 12px; margin-top: 6px; flex-wrap: wrap">
+          <div style="flex: 1 1 160px">
+            <input
+              type="text"
+              id="userName"
+              placeholder="姓名 / 昵称，例如：CloudHu"
+              autocomplete="off"
+            />
+          </div>
+          <div style="flex: 1 1 180px">
+            <input
+              type="email"
+              id="userEmail"
+              placeholder="邮箱，例如：you@example.com"
+              autocomplete="off"
+            />
+          </div>
+        </div>
+        <div class="hint">
+          - 用于自动填写注册表单和评论表单中的 Name / Email / 姓名 / 邮箱 字段。<br />
+          - 留空时会使用扩展内置的默认姓名和邮箱。
+        </div>
+      </div>
+
+      <div style="margin-top: 20px">
+        <label
+          for="autoOpenPanel"
+          style="display: flex; align-items: center; gap: 8px; font-weight: 600"
+        >
+          <input type="checkbox" id="autoOpenPanel" />
+          页面加载后自动打开“网站推广助手”浮动窗口
+        </label>
+        <div class="hint">
+          - 勾选后，每次打开页面都会在右下角自动弹出推广助手窗口，方便连续撰写评论。<br />
+          - 取消勾选则仅在点击扩展图标时才会打开浮动窗口。
         </div>
       </div>
 
