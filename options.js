@@ -6,14 +6,18 @@ const WEBSITE_URL_STORAGE_KEY = 'promotion_website_url';
 const AUTO_OPEN_QWEN_PANEL_KEY = 'auto_open_qwen_panel';
 const USER_NAME_STORAGE_KEY = 'auto_fill_user_name';
 const USER_EMAIL_STORAGE_KEY = 'auto_fill_user_email';
+const USER_PASSWORD_STORAGE_KEY = 'auto_fill_user_password';
+const AUTO_GENERATE_QWEN_ON_PAGE_LOAD_KEY = 'auto_generate_qwen_on_page_load';
 
 document.addEventListener('DOMContentLoaded', () => {
   const apiKeyInput = document.getElementById('apiKey');
   const skillTemplateInput = document.getElementById('skillTemplate');
   const websiteUrlInput = document.getElementById('websiteUrl');
   const autoOpenPanelCheckbox = document.getElementById('autoOpenPanel');
+  const autoGenerateOnLoadCheckbox = document.getElementById('autoGenerateOnLoad');
   const userNameInput = document.getElementById('userName');
   const userEmailInput = document.getElementById('userEmail');
+  const userPasswordInput = document.getElementById('userPassword');
   const saveBtn = document.getElementById('saveBtn');
   const clearBtn = document.getElementById('clearBtn');
   const statusEl = document.getElementById('status');
@@ -23,8 +27,10 @@ document.addEventListener('DOMContentLoaded', () => {
     !skillTemplateInput ||
     !websiteUrlInput ||
     !autoOpenPanelCheckbox ||
+    !autoGenerateOnLoadCheckbox ||
     !userNameInput ||
     !userEmailInput ||
+    !userPasswordInput ||
     !saveBtn ||
     !clearBtn ||
     !statusEl
@@ -52,7 +58,8 @@ document.addEventListener('DOMContentLoaded', () => {
       WEBSITE_URL_STORAGE_KEY,
       AUTO_OPEN_QWEN_PANEL_KEY,
       USER_NAME_STORAGE_KEY,
-      USER_EMAIL_STORAGE_KEY
+      USER_EMAIL_STORAGE_KEY,
+      USER_PASSWORD_STORAGE_KEY
     ],
     (result) => {
       if (chrome.runtime.lastError) {
@@ -83,8 +90,36 @@ document.addEventListener('DOMContentLoaded', () => {
       if (result && typeof result[USER_EMAIL_STORAGE_KEY] === 'string') {
         userEmailInput.value = result[USER_EMAIL_STORAGE_KEY];
       }
+      if (result && typeof result[USER_PASSWORD_STORAGE_KEY] === 'string') {
+        userPasswordInput.value = result[USER_PASSWORD_STORAGE_KEY];
+      }
     }
   );
+
+  // 会话级设置：是否在页面加载时自动调用通义千问生成推广文案
+  // 使用 chrome.storage.session 存储，确保在浏览器重启后自动恢复为关闭状态
+  (function initSessionAutoGenerateSetting() {
+    if (!chrome.storage || !chrome.storage.session) {
+      // 在不支持 session 存储的环境下，保持开关默认关闭
+      if (autoGenerateOnLoadCheckbox) {
+        autoGenerateOnLoadCheckbox.checked = false;
+      }
+      return;
+    }
+    chrome.storage.session.get([AUTO_GENERATE_QWEN_ON_PAGE_LOAD_KEY], (result) => {
+      if (chrome.runtime.lastError) {
+        console.error('读取自动生成推广文案（会话级）设置失败：', chrome.runtime.lastError);
+        autoGenerateOnLoadCheckbox.checked = false;
+        return;
+      }
+      if (result && typeof result[AUTO_GENERATE_QWEN_ON_PAGE_LOAD_KEY] === 'boolean') {
+        autoGenerateOnLoadCheckbox.checked = result[AUTO_GENERATE_QWEN_ON_PAGE_LOAD_KEY];
+      } else {
+        // 默认关闭
+        autoGenerateOnLoadCheckbox.checked = false;
+      }
+    });
+  })();
 
   function showStatus(text, timeout = 1600) {
     statusEl.textContent = text;
@@ -102,8 +137,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const skillTemplate = skillTemplateInput.value.trim();
     const websiteUrl = websiteUrlInput.value.trim();
     const autoOpenPanel = !!autoOpenPanelCheckbox.checked;
+    const autoGenerateOnLoad = !!autoGenerateOnLoadCheckbox.checked;
     const userName = userNameInput.value.trim();
     const userEmail = userEmailInput.value.trim();
+  const userPassword = userPasswordInput.value.trim();
 
     chrome.storage.sync.set(
       {
@@ -112,7 +149,8 @@ document.addEventListener('DOMContentLoaded', () => {
         [WEBSITE_URL_STORAGE_KEY]: websiteUrl,
         [AUTO_OPEN_QWEN_PANEL_KEY]: autoOpenPanel,
         [USER_NAME_STORAGE_KEY]: userName,
-        [USER_EMAIL_STORAGE_KEY]: userEmail
+        [USER_EMAIL_STORAGE_KEY]: userEmail,
+        [USER_PASSWORD_STORAGE_KEY]: userPassword
       },
       () => {
         if (chrome.runtime.lastError) {
@@ -120,7 +158,29 @@ document.addEventListener('DOMContentLoaded', () => {
           showStatus('保存失败', 2000);
           return;
         }
-        showStatus('已保存');
+
+        // 保存会话级自动生成开关（仅在当前浏览器会话内生效）
+        if (chrome.storage && chrome.storage.session && chrome.storage.session.set) {
+          chrome.storage.session.set(
+            {
+              [AUTO_GENERATE_QWEN_ON_PAGE_LOAD_KEY]: autoGenerateOnLoad
+            },
+            () => {
+              if (chrome.runtime.lastError) {
+                console.error(
+                  '保存自动生成推广文案（会话级）设置失败：',
+                  chrome.runtime.lastError
+                );
+                showStatus('部分设置保存失败', 2000);
+                return;
+              }
+              showStatus('已保存');
+            }
+          );
+        } else {
+          // 在不支持 session 的环境中，不持久化该开关，保持默认关闭
+          showStatus('已保存');
+        }
       }
     );
   });

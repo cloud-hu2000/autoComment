@@ -9,6 +9,7 @@
     const userProfile = await getUserProfile();
     const EMAIL = userProfile.email;
     const USERNAME = userProfile.name;
+    const PASSWORD = userProfile.password;
     const allInputs = Array.from(document.querySelectorAll('input'));
     const allTextareas = Array.from(document.querySelectorAll('textarea'));
 
@@ -244,8 +245,10 @@
   const SKILL_TEMPLATE_STORAGE_KEY = 'qwen_skill_template';
   const WEBSITE_URL_STORAGE_KEY = 'promotion_website_url';
   const AUTO_OPEN_QWEN_PANEL_KEY = 'auto_open_qwen_panel';
+  const AUTO_GENERATE_QWEN_ON_PAGE_LOAD_KEY = 'auto_generate_qwen_on_page_load';
   const USER_NAME_STORAGE_KEY = 'auto_fill_user_name';
   const USER_EMAIL_STORAGE_KEY = 'auto_fill_user_email';
+  const USER_PASSWORD_STORAGE_KEY = 'auto_fill_user_password';
 
   // 最近一次通义千问生成的推广文案（用于页面自动填充 & 浮动窗口回显）
   let lastGeneratedPromotionCopy = '';
@@ -332,38 +335,48 @@
     });
   }
 
-  // 从 chrome.storage.sync 中异步获取用户的姓名和邮箱，用于自动填表
-  // 如果为空或读取失败，则回退到扩展内置的默认姓名 / 邮箱
+  // 从 chrome.storage.sync 中异步获取用户的姓名 / 邮箱 / 密码，用于自动填表
+  // 如果为空或读取失败，则回退到扩展内置的默认姓名 / 邮箱 / 密码
   function getUserProfile() {
     return new Promise((resolve) => {
       if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.sync) {
-        resolve({ name: DEFAULT_USERNAME, email: DEFAULT_EMAIL });
+        resolve({ name: DEFAULT_USERNAME, email: DEFAULT_EMAIL, password: DEFAULT_PASSWORD });
         return;
       }
-      chrome.storage.sync.get([USER_NAME_STORAGE_KEY, USER_EMAIL_STORAGE_KEY], (result) => {
-        if (chrome.runtime && chrome.runtime.lastError) {
-          console.error('读取用户姓名/邮箱失败：', chrome.runtime.lastError);
-          resolve({ name: DEFAULT_USERNAME, email: DEFAULT_EMAIL });
-          return;
-        }
-        let name =
-          result && typeof result[USER_NAME_STORAGE_KEY] === 'string'
-            ? result[USER_NAME_STORAGE_KEY].trim()
-            : '';
-        let email =
-          result && typeof result[USER_EMAIL_STORAGE_KEY] === 'string'
-            ? result[USER_EMAIL_STORAGE_KEY].trim()
-            : '';
+      chrome.storage.sync.get(
+        [USER_NAME_STORAGE_KEY, USER_EMAIL_STORAGE_KEY, USER_PASSWORD_STORAGE_KEY],
+        (result) => {
+          if (chrome.runtime && chrome.runtime.lastError) {
+            console.error('读取用户姓名/邮箱/密码失败：', chrome.runtime.lastError);
+            resolve({ name: DEFAULT_USERNAME, email: DEFAULT_EMAIL, password: DEFAULT_PASSWORD });
+            return;
+          }
+          let name =
+            result && typeof result[USER_NAME_STORAGE_KEY] === 'string'
+              ? result[USER_NAME_STORAGE_KEY].trim()
+              : '';
+          let email =
+            result && typeof result[USER_EMAIL_STORAGE_KEY] === 'string'
+              ? result[USER_EMAIL_STORAGE_KEY].trim()
+              : '';
+          let password =
+            result && typeof result[USER_PASSWORD_STORAGE_KEY] === 'string'
+              ? result[USER_PASSWORD_STORAGE_KEY].trim()
+              : '';
 
-        if (!name) {
-          name = DEFAULT_USERNAME;
-        }
-        if (!email) {
-          email = DEFAULT_EMAIL;
-        }
+          if (!name) {
+            name = DEFAULT_USERNAME;
+          }
+          if (!email) {
+            email = DEFAULT_EMAIL;
+          }
+          if (!password) {
+            password = DEFAULT_PASSWORD;
+          }
 
-        resolve({ name, email });
-      });
+          resolve({ name, email, password });
+        }
+      );
     });
   }
 
@@ -386,6 +399,33 @@
           return;
         }
         resolve(Boolean(result[AUTO_OPEN_QWEN_PANEL_KEY]));
+      });
+    });
+  }
+
+  // 从 chrome.storage.session 中异步获取“是否在页面加载时自动调用通义千问生成推广文案”的设置
+  // 出于节省 token 的考虑，默认值为 false，且该设置仅在当前浏览器会话内生效
+  function getAutoGenerateQwenOnPageLoadSetting() {
+    return new Promise((resolve) => {
+      if (typeof chrome === 'undefined' || !chrome.storage) {
+        resolve(false);
+        return;
+      }
+
+      const sessionStorage = chrome.storage.session;
+      const storageArea = sessionStorage && sessionStorage.get ? sessionStorage : chrome.storage.sync;
+
+      storageArea.get([AUTO_GENERATE_QWEN_ON_PAGE_LOAD_KEY], (result) => {
+        if (chrome.runtime && chrome.runtime.lastError) {
+          console.error('读取自动生成推广文案设置失败：', chrome.runtime.lastError);
+          resolve(false);
+          return;
+        }
+        if (!result || typeof result[AUTO_GENERATE_QWEN_ON_PAGE_LOAD_KEY] === 'undefined') {
+          resolve(false);
+          return;
+        }
+        resolve(Boolean(result[AUTO_GENERATE_QWEN_ON_PAGE_LOAD_KEY]));
       });
     });
   }
@@ -440,7 +480,12 @@
       }
     });
     // 根据当前页面内容，自动调用通义千问生成一份推广文案，并尝试填充到评论框 & 浮动窗口
-    autoGeneratePromotionOnPageLoad();
+    // 该行为受选项页中的开关控制，且开关默认关闭、随浏览器会话重置为关闭，以避免意外消耗过多 token
+    getAutoGenerateQwenOnPageLoadSetting().then((shouldAutoGenerate) => {
+      if (shouldAutoGenerate) {
+        autoGeneratePromotionOnPageLoad();
+      }
+    });
   }
 
   if (document.readyState === 'loading') {

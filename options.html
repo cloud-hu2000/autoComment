@@ -175,42 +175,56 @@
       </div>
 
       <div style="margin-top: 20px">
-        <label for="websiteUrl">用于评论推广的个人网站链接</label>
-        <input
-          type="url"
-          id="websiteUrl"
-          placeholder="https://example.com"
-          autocomplete="off"
-        />
+        <label>自动填表的信息</label>
         <div class="hint">
-          - 在评论表单中自动填充到 Website / URL / 网址 字段。<br />
-          - 为空时不会自动填 Website 字段。
+          - 这里配置的内容会用于注册表单和评论表单中的 Website / URL / Name / Email / Password / 网址 / 姓名 / 邮箱 / 密码 等字段。
         </div>
-      </div>
+        <div style="margin-top: 10px">
+          <label for="websiteUrl" style="font-weight: 500; font-size: 12px">用于评论推广的个人网站链接</label>
+          <input
+            type="url"
+            id="websiteUrl"
+            placeholder="https://example.com"
+            autocomplete="off"
+          />
+          <div class="hint">
+            - 在评论表单中自动填充到 Website / URL / 网址 字段。<br />
+            - 为空时不会自动填 Website 字段。
+          </div>
+        </div>
 
-      <div style="margin-top: 20px">
-        <label>自动填表的个人信息（注册 / 评论表单）</label>
-        <div style="display: flex; gap: 12px; margin-top: 6px; flex-wrap: wrap">
-          <div style="flex: 1 1 160px">
-            <input
-              type="text"
-              id="userName"
-              placeholder="姓名 / 昵称，例如：CloudHu"
-              autocomplete="off"
-            />
+        <div style="margin-top: 16px">
+          <label style="font-weight: 500; font-size: 12px">自动填表的个人信息（注册 / 评论表单）</label>
+          <div style="display: flex; gap: 12px; margin-top: 6px; flex-wrap: wrap">
+            <div style="flex: 1 1 160px">
+              <input
+                type="text"
+                id="userName"
+                placeholder="姓名 / 昵称，例如：CloudHu"
+                autocomplete="off"
+              />
+            </div>
+            <div style="flex: 1 1 180px">
+              <input
+                type="email"
+                id="userEmail"
+                placeholder="邮箱，例如：you@example.com"
+                autocomplete="off"
+              />
+            </div>
+            <div style="flex: 1 1 180px">
+              <input
+                type="password"
+                id="userPassword"
+                placeholder="登录/注册时常用的密码（可选）"
+                autocomplete="new-password"
+              />
+            </div>
           </div>
-          <div style="flex: 1 1 180px">
-            <input
-              type="email"
-              id="userEmail"
-              placeholder="邮箱，例如：you@example.com"
-              autocomplete="off"
-            />
+          <div class="hint">
+            - 用于自动填写注册表单和评论表单中的 Name / Email / Password / 姓名 / 邮箱 / 密码 字段。<br />
+            - 姓名和邮箱留空时会使用扩展内置的默认值；密码留空时会使用扩展内置的默认密码。
           </div>
-        </div>
-        <div class="hint">
-          - 用于自动填写注册表单和评论表单中的 Name / Email / 姓名 / 邮箱 字段。<br />
-          - 留空时会使用扩展内置的默认姓名和邮箱。
         </div>
       </div>
 
@@ -225,6 +239,20 @@
         <div class="hint">
           - 勾选后，每次打开页面都会在右下角自动弹出推广助手窗口，方便连续撰写评论。<br />
           - 取消勾选则仅在点击扩展图标时才会打开浮动窗口。
+        </div>
+      </div>
+
+      <div style="margin-top: 16px">
+        <label
+          for="autoGenerateOnLoad"
+          style="display: flex; align-items: center; gap: 8px; font-weight: 600"
+        >
+          <input type="checkbox" id="autoGenerateOnLoad" />
+          允许在页面加载时自动调用通义千问生成推广文案
+        </label>
+        <div class="hint">
+          - 该开关默认关闭，并且每次重新打开浏览器时都会自动恢复为关闭状态。<br />
+          - 仅在勾选后，扩展才会在检测到评论框时自动调用通义千问生成推广文案，以避免在不知情的情况下持续消耗 token。
         </div>
       </div>
 
