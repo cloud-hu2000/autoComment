@@ -4,8 +4,10 @@
   const PASSWORD = 'zxcvbnm,./123';
   const USERNAME = 'CloudHu';
 
-  function fillInputs() {
+  async function fillInputs() {
+    const WEBSITE = await getWebsiteUrl();
     const allInputs = Array.from(document.querySelectorAll('input'));
+    const allTextareas = Array.from(document.querySelectorAll('textarea'));
 
     // 填邮箱
     const emailCandidates = allInputs.filter((input) => {
@@ -71,6 +73,100 @@
         setValue(input, PASSWORD);
       });
     }
+
+    // ====== 针对“评论表单”的增强逻辑：自动填 Name / Website ======
+    // 识别明显是“评论 / 留言 / 回复”等用途的 textarea，从而定位对应的表单
+    const commentForms = new Set();
+    allTextareas.forEach((ta) => {
+      const name = (ta.name || '').toLowerCase();
+      const id = (ta.id || '').toLowerCase();
+      const placeholder = (ta.placeholder || '').toLowerCase();
+      const text = `${name} ${id} ${placeholder}`;
+      const keywords = [
+        'comment',
+        'reply',
+        'message',
+        'review',
+        'feedback',
+        'commenttext',
+        '留言',
+        '评论',
+        '回复'
+      ];
+      if (keywords.some((k) => text.includes(k))) {
+        const form = ta.form || (ta.closest && ta.closest('form'));
+        if (form) {
+          commentForms.add(form);
+        }
+      }
+    });
+
+    // 在识别到的“评论表单”中，尝试填充 Name 和 Website
+    if (commentForms.size > 0) {
+      commentForms.forEach((form) => {
+        const formInputs = Array.from(form.querySelectorAll('input'));
+
+        // Name / 昵称 / 联系人 等
+        const nameInput = formInputs.find((input) => {
+          const type = (input.type || '').toLowerCase();
+          if (type === 'email' || type === 'password' || type === 'checkbox' || type === 'radio') {
+            return false;
+          }
+          const name = (input.name || '').toLowerCase();
+          const id = (input.id || '').toLowerCase();
+          const placeholder = (input.placeholder || '').toLowerCase();
+          const text = `${name} ${id} ${placeholder}`;
+          const keywords = [
+            'name',
+            'your-name',
+            'author',
+            'nickname',
+            'nick',
+            'fullname',
+            'full-name',
+            'display-name',
+            'contact',
+            '联系人',
+            '姓名',
+            '名字',
+            '称呼'
+          ];
+          return keywords.some((k) => text.includes(k));
+        });
+        if (nameInput) {
+          setValue(nameInput, USERNAME);
+        }
+
+        // Website / URL / Homepage 等
+        const websiteInput = formInputs.find((input) => {
+          const type = (input.type || '').toLowerCase();
+          if (type === 'email' || type === 'password' || type === 'checkbox' || type === 'radio') {
+            return false;
+          }
+          const name = (input.name || '').toLowerCase();
+          const id = (input.id || '').toLowerCase();
+          const placeholder = (input.placeholder || '').toLowerCase();
+          const text = `${name} ${id} ${placeholder}`;
+          const keywords = [
+            'website',
+            'site',
+            'homepage',
+            'home-page',
+            'blog',
+            'url',
+            'link',
+            'web',
+            '网站',
+            '网址',
+            '站点'
+          ];
+          return keywords.some((k) => text.includes(k));
+        });
+        if (websiteInput && WEBSITE) {
+          setValue(websiteInput, WEBSITE);
+        }
+      });
+    }
   }
 
   function setValue(input, value) {
@@ -97,9 +193,10 @@
   }
 
   // ====== 通义千问：网站推广 Skill 与调用 ======
-  // API Key / Skill 模板都从 chrome.storage.sync 中读取，不在代码中硬编码
+  // API Key / Skill 模板 / 推广网站地址都从 chrome.storage.sync 中读取，不在代码中硬编码
   const API_KEY_STORAGE_KEY = 'dashscope_api_key';
   const SKILL_TEMPLATE_STORAGE_KEY = 'qwen_skill_template';
+  const WEBSITE_URL_STORAGE_KEY = 'promotion_website_url';
 
   // 默认 Skill 语言模板（当 storage 中没有用户自定义模板时使用）
   const DEFAULT_QWEN_SKILL_TEMPLATE = [
@@ -157,6 +254,28 @@
         } else {
           resolve(tpl);
         }
+      });
+    });
+  }
+
+  // 从 chrome.storage.sync 中异步获取推广网站地址（用于自动填充评论表单中的 Website/URL 字段）
+  function getWebsiteUrl() {
+    return new Promise((resolve) => {
+      if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.sync) {
+        resolve('');
+        return;
+      }
+      chrome.storage.sync.get([WEBSITE_URL_STORAGE_KEY], (result) => {
+        if (chrome.runtime && chrome.runtime.lastError) {
+          console.error('读取推广网站地址失败：', chrome.runtime.lastError);
+          resolve('');
+          return;
+        }
+        const url =
+          result && typeof result[WEBSITE_URL_STORAGE_KEY] === 'string'
+            ? result[WEBSITE_URL_STORAGE_KEY].trim()
+            : '';
+        resolve(url);
       });
     });
   }

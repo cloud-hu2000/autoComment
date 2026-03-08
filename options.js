@@ -2,15 +2,17 @@
 
 const API_KEY_STORAGE_KEY = 'dashscope_api_key';
 const SKILL_TEMPLATE_STORAGE_KEY = 'qwen_skill_template';
+const WEBSITE_URL_STORAGE_KEY = 'promotion_website_url';
 
 document.addEventListener('DOMContentLoaded', () => {
   const apiKeyInput = document.getElementById('apiKey');
   const skillTemplateInput = document.getElementById('skillTemplate');
+  const websiteUrlInput = document.getElementById('websiteUrl');
   const saveBtn = document.getElementById('saveBtn');
   const clearBtn = document.getElementById('clearBtn');
   const statusEl = document.getElementById('status');
 
-  if (!apiKeyInput || !skillTemplateInput || !saveBtn || !clearBtn || !statusEl) {
+  if (!apiKeyInput || !skillTemplateInput || !websiteUrlInput || !saveBtn || !clearBtn || !statusEl) {
     console.error('Options page 初始化失败：元素未找到');
     return;
   }
@@ -27,21 +29,27 @@ document.addEventListener('DOMContentLoaded', () => {
   ].join('\n');
 
   // 初始化时从 chrome.storage.sync 读取
-  chrome.storage.sync.get([API_KEY_STORAGE_KEY, SKILL_TEMPLATE_STORAGE_KEY], (result) => {
+  chrome.storage.sync.get(
+    [API_KEY_STORAGE_KEY, SKILL_TEMPLATE_STORAGE_KEY, WEBSITE_URL_STORAGE_KEY],
+    (result) => {
     if (chrome.runtime.lastError) {
       console.error('读取设置失败：', chrome.runtime.lastError);
       return;
     }
-    if (result && typeof result[API_KEY_STORAGE_KEY] === 'string') {
-      apiKeyInput.value = result[API_KEY_STORAGE_KEY];
+      if (result && typeof result[API_KEY_STORAGE_KEY] === 'string') {
+        apiKeyInput.value = result[API_KEY_STORAGE_KEY];
+      }
+      if (result && typeof result[SKILL_TEMPLATE_STORAGE_KEY] === 'string') {
+        skillTemplateInput.value = result[SKILL_TEMPLATE_STORAGE_KEY];
+      } else {
+        // 如果尚未自定义过模板，则在界面中展示默认模板，方便用户修改
+        skillTemplateInput.value = DEFAULT_SKILL_TEMPLATE;
+      }
+      if (result && typeof result[WEBSITE_URL_STORAGE_KEY] === 'string') {
+        websiteUrlInput.value = result[WEBSITE_URL_STORAGE_KEY];
+      }
     }
-    if (result && typeof result[SKILL_TEMPLATE_STORAGE_KEY] === 'string') {
-      skillTemplateInput.value = result[SKILL_TEMPLATE_STORAGE_KEY];
-    } else {
-      // 如果尚未自定义过模板，则在界面中展示默认模板，方便用户修改
-      skillTemplateInput.value = DEFAULT_SKILL_TEMPLATE;
-    }
-  });
+  );
 
   function showStatus(text, timeout = 1600) {
     statusEl.textContent = text;
@@ -57,19 +65,21 @@ document.addEventListener('DOMContentLoaded', () => {
   saveBtn.addEventListener('click', () => {
     const key = apiKeyInput.value.trim();
     const skillTemplate = skillTemplateInput.value.trim();
+    const websiteUrl = websiteUrlInput.value.trim();
 
     chrome.storage.sync.set(
       {
         [API_KEY_STORAGE_KEY]: key,
-        [SKILL_TEMPLATE_STORAGE_KEY]: skillTemplate
+        [SKILL_TEMPLATE_STORAGE_KEY]: skillTemplate,
+        [WEBSITE_URL_STORAGE_KEY]: websiteUrl
       },
       () => {
-      if (chrome.runtime.lastError) {
-        console.error('保存设置失败：', chrome.runtime.lastError);
-        showStatus('保存失败', 2000);
-        return;
-      }
-      showStatus('已保存');
+        if (chrome.runtime.lastError) {
+          console.error('保存设置失败：', chrome.runtime.lastError);
+          showStatus('保存失败', 2000);
+          return;
+        }
+        showStatus('已保存');
       }
     );
   });
