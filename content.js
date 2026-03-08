@@ -9,12 +9,14 @@
     const allInputs = Array.from(document.querySelectorAll('input'));
     const allTextareas = Array.from(document.querySelectorAll('textarea'));
 
-    // 填邮箱
+    // 填邮箱（全局优先填第一个看起来像 Email 的输入框）
     const emailCandidates = allInputs.filter((input) => {
       const type = (input.type || '').toLowerCase();
       const name = (input.name || '').toLowerCase();
       const id = (input.id || '').toLowerCase();
       const placeholder = (input.placeholder || '').toLowerCase();
+
+      if (type === 'hidden') return false;
 
       if (type === 'email') return true;
 
@@ -74,7 +76,7 @@
       });
     }
 
-    // ====== 针对“评论表单”的增强逻辑：自动填 Name / Website ======
+    // ====== 针对“评论表单”的增强逻辑：自动填 Name / Email / Website ======
     // 识别明显是“评论 / 留言 / 回复”等用途的 textarea，从而定位对应的表单
     const commentForms = new Set();
     allTextareas.forEach((ta) => {
@@ -84,10 +86,16 @@
       const text = `${name} ${id} ${placeholder}`;
       const keywords = [
         'comment',
+        'comentario',
         'reply',
+        'respuesta',
         'message',
+        'mensaje',
         'review',
+        'reseña',
         'feedback',
+        'opinion',
+        'opinión',
         'commenttext',
         '留言',
         '评论',
@@ -100,6 +108,26 @@
         }
       }
     });
+
+    // 兜底：如果通过 textarea 属性没能识别到评论表单，再根据表单内文案来猜测
+    // 兼容类似 Deusto 博客这种“Deja una respuesta / Tu dirección de correo electrónico no será publicada”结构
+    if (commentForms.size === 0) {
+      const forms = Array.from(document.querySelectorAll('form'));
+      forms.forEach((form) => {
+        const text = (form.textContent || '').toLowerCase();
+        const keywords = [
+          'deja una respuesta',
+          'deja un comentario',
+          'tu dirección de correo electrónico no será publicada',
+          'comentario *',
+          'leave a reply',
+          'leave a comment'
+        ];
+        if (keywords.some((k) => text.includes(k))) {
+          commentForms.add(form);
+        }
+      });
+    }
 
     // 在识别到的“评论表单”中，尝试填充 Name 和 Website
     if (commentForms.size > 0) {
@@ -129,12 +157,34 @@
             '联系人',
             '姓名',
             '名字',
-            '称呼'
+            '称呼',
+            'nombre' // 西班牙语：名字
           ];
           return keywords.some((k) => text.includes(k));
         });
         if (nameInput) {
           setValue(nameInput, USERNAME);
+        }
+
+        // Email（优先在评论表单内部单独再填一次，避免被其他订阅框“抢占”）
+        const emailInputInForm = formInputs.find((input) => {
+          const type = (input.type || '').toLowerCase();
+          const name = (input.name || '').toLowerCase();
+          const id = (input.id || '').toLowerCase();
+          const placeholder = (input.placeholder || '').toLowerCase();
+
+          if (type === 'hidden' || type === 'password' || type === 'checkbox' || type === 'radio') {
+            return false;
+          }
+
+          if (type === 'email') return true;
+
+          const text = `${name} ${id} ${placeholder}`;
+          const keywords = ['email', 'e-mail', 'mail'];
+          return keywords.some((k) => text.includes(k));
+        });
+        if (emailInputInForm) {
+          setValue(emailInputInForm, EMAIL);
         }
 
         // Website / URL / Homepage 等
@@ -183,13 +233,6 @@
 
     input.dispatchEvent(new Event('input', { bubbles: true }));
     input.dispatchEvent(new Event('change', { bubbles: true }));
-  }
-
-  // 初次加载（仅在页面打开/刷新时自动填表一次）
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', fillInputs);
-  } else {
-    fillInputs();
   }
 
   // ====== 通义千问：网站推广 Skill 与调用 ======
@@ -278,6 +321,13 @@
         resolve(url);
       });
     });
+  }
+
+  // 初次加载（仅在页面打开/刷新时自动填表一次）
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', fillInputs);
+  } else {
+    fillInputs();
   }
 
   // 收集当前页面内容 + 调用通义千问生成推广文案（仅负责返回文本，不做 UI 交互）
