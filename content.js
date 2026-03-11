@@ -486,6 +486,9 @@
       // 自动填充到页面中识别到的“评论”文本框（仅在目标文本框当前为空时填充）
       tryFillCommentTextareaWithPromotion(text);
 
+      // 聚焦到评论框，并在需要时填充文案
+      focusCommentTextareaWithPromotion(text);
+
       // 如果浮动窗口已存在，则同步更新到浮动窗口的文本区域和复制按钮状态
       if (
         qwenPanelEl &&
