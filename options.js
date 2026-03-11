@@ -96,19 +96,19 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   );
 
-  // 会话级设置：是否在页面加载时自动调用通义千问生成推广文案
-  // 使用 chrome.storage.session 存储，确保在浏览器重启后自动恢复为关闭状态
+  // 设置：是否在页面加载时自动调用通义千问生成推广文案
+  // 使用 chrome.storage.sync 存储，便于内容脚本直接读取
   (function initSessionAutoGenerateSetting() {
-    if (!chrome.storage || !chrome.storage.session) {
-      // 在不支持 session 存储的环境下，保持开关默认关闭
+    if (!chrome.storage || !chrome.storage.sync) {
+      // 在不支持 storage 的环境下，保持开关默认关闭
       if (autoGenerateOnLoadCheckbox) {
         autoGenerateOnLoadCheckbox.checked = false;
       }
       return;
     }
-    chrome.storage.session.get([AUTO_GENERATE_QWEN_ON_PAGE_LOAD_KEY], (result) => {
+    chrome.storage.sync.get([AUTO_GENERATE_QWEN_ON_PAGE_LOAD_KEY], (result) => {
       if (chrome.runtime.lastError) {
-        console.error('读取自动生成推广文案（会话级）设置失败：', chrome.runtime.lastError);
+        console.error('读取自动生成推广文案设置失败：', chrome.runtime.lastError);
         autoGenerateOnLoadCheckbox.checked = false;
         return;
       }
@@ -150,7 +150,8 @@ document.addEventListener('DOMContentLoaded', () => {
         [AUTO_OPEN_QWEN_PANEL_KEY]: autoOpenPanel,
         [USER_NAME_STORAGE_KEY]: userName,
         [USER_EMAIL_STORAGE_KEY]: userEmail,
-        [USER_PASSWORD_STORAGE_KEY]: userPassword
+        [USER_PASSWORD_STORAGE_KEY]: userPassword,
+        [AUTO_GENERATE_QWEN_ON_PAGE_LOAD_KEY]: autoGenerateOnLoad
       },
       () => {
         if (chrome.runtime.lastError) {
@@ -159,28 +160,7 @@ document.addEventListener('DOMContentLoaded', () => {
           return;
         }
 
-        // 保存会话级自动生成开关（仅在当前浏览器会话内生效）
-        if (chrome.storage && chrome.storage.session && chrome.storage.session.set) {
-          chrome.storage.session.set(
-            {
-              [AUTO_GENERATE_QWEN_ON_PAGE_LOAD_KEY]: autoGenerateOnLoad
-            },
-            () => {
-              if (chrome.runtime.lastError) {
-                console.error(
-                  '保存自动生成推广文案（会话级）设置失败：',
-                  chrome.runtime.lastError
-                );
-                showStatus('部分设置保存失败', 2000);
-                return;
-              }
-              showStatus('已保存');
-            }
-          );
-        } else {
-          // 在不支持 session 的环境中，不持久化该开关，保持默认关闭
-          showStatus('已保存');
-        }
+        showStatus('已保存');
       }
     );
   });
