@@ -1,8 +1,9 @@
 (function () {
   // ====== 原有自动填表功能 ======
-  const DEFAULT_EMAIL = 'cloudhu2000@gmail.com';
-  const DEFAULT_PASSWORD = 'zxcvbnm,./123';
-  const DEFAULT_USERNAME = 'CloudHu';
+  // 默认值设为空，用户需要在扩展选项中配置
+  const DEFAULT_EMAIL = '';
+  const DEFAULT_PASSWORD = '';
+  const DEFAULT_USERNAME = '';
 
   async function fillInputs() {
     const WEBSITE = await getWebsiteUrl();
@@ -33,7 +34,7 @@
       setValue(emailInput, EMAIL);
     }
 
-    // 填用户名（尽量匹配“用户名 / 账号 / 昵称 / login / username”等字段）
+    // 填用户名（尽量匹配"用户名 / 账号 / 昵称 / login / username"等字段）
     const usernameCandidates = allInputs.filter((input) => {
       const type = (input.type || '').toLowerCase();
       // 排除明显不是用户名的字段
@@ -80,8 +81,8 @@
       });
     }
 
-    // ====== 针对“评论表单”的增强逻辑：自动填 Name / Email / Website ======
-    // 识别明显是“评论 / 留言 / 回复”等用途的 textarea，从而定位对应的表单
+    // ====== 针对"评论表单"的增强逻辑：自动填 Name / Email / Website ======
+    // 识别明显是"评论 / 留言 / 回复"等用途的 textarea，从而定位对应的表单
     const commentForms = new Set();
     allTextareas.forEach((ta) => {
       const name = (ta.name || '').toLowerCase();
@@ -114,7 +115,7 @@
     });
 
     // 兜底：如果通过 textarea 属性没能识别到评论表单，再根据表单内文案来猜测
-    // 兼容类似 Deusto 博客这种“Deja una respuesta / Tu dirección de correo electrónico no será publicada”结构
+    // 兼容类似 Deusto 博客这种"Deja una respuesta / Tu dirección de correo electrónico no será publicada"结构
     if (commentForms.size === 0) {
       const forms = Array.from(document.querySelectorAll('form'));
       forms.forEach((form) => {
@@ -133,7 +134,7 @@
       });
     }
 
-    // 在识别到的“评论表单”中，尝试填充 Name 和 Website
+    // 在识别到的"评论表单"中，尝试填充 Name 和 Website
     if (commentForms.size > 0) {
       commentForms.forEach((form) => {
         const formInputs = Array.from(form.querySelectorAll('input'));
@@ -170,7 +171,7 @@
           setValue(nameInput, USERNAME);
         }
 
-        // Email（优先在评论表单内部单独再填一次，避免被其他订阅框“抢占”）
+        // Email（优先在评论表单内部单独再填一次，避免被其他订阅框"抢占"）
         const emailInputInForm = formInputs.find((input) => {
           const type = (input.type || '').toLowerCase();
           const name = (input.name || '').toLowerCase();
@@ -250,13 +251,37 @@
   const USER_EMAIL_STORAGE_KEY = 'auto_fill_user_email';
   const USER_PASSWORD_STORAGE_KEY = 'auto_fill_user_password';
 
+  // ====== 防重复生成配置 ======
+  // 冷却时间：同一域名在24小时内不重复生成推广文案（单位：毫秒）
+  const DOMAIN_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+  const GENERATION_RECORD_KEY = 'qwen_generation_records';
+  // 表单提交后短期冷却时间（5分钟），防止页面刷新后重复生成
+  const SUBMIT_COOLDOWN_MS = 5 * 60 * 1000;
+  const SUBMIT_COOLDOWN_KEY = 'qwen_submit_cooldown';
+
+  // 从URL中提取域名（用于冷却判断）
+  function extractDomain(url) {
+    try {
+      const urlObj = new URL(url);
+      return urlObj.hostname;
+    } catch (e) {
+      const match = url.match(/^https?:\/\/([^/]+)/);
+      return match ? match[1] : url;
+    }
+  }
+
+  // 获取当前页面的域名
+  function getCurrentDomain() {
+    return extractDomain(window.location.href);
+  }
+
   // 最近一次通义千问生成的推广文案（用于页面自动填充 & 浮动窗口回显）
   let lastGeneratedPromotionCopy = '';
 
   // 默认 Skill 语言模板（当 storage 中没有用户自定义模板时使用）
   const DEFAULT_QWEN_SKILL_TEMPLATE = [
     '你是一个资深的网站营销与文案专家，擅长为各类网站撰写高转化率的推广文案。',
-    '请严格根据我提供的“当前网站内容”进行分析和创作，不要凭空捏造网站不存在的功能或信息。',
+    '请严格根据我提供的"当前网站内容"进行分析和创作，不要凭空捏造网站不存在的功能或信息。',
     '',
     '【输出要求】',
     '1. 先用 1–2 句话高度概括该网站的核心价值和目标用户。',
@@ -380,7 +405,7 @@
     });
   }
 
-  // 从 chrome.storage.sync 中异步获取“是否自动打开浮动窗口”的设置
+  // 从 chrome.storage.sync 中异步获取"是否自动打开浮动窗口"的设置
   // 默认值：true（即未设置或读取失败时，视为开启自动打开）
   function getAutoOpenQwenPanelSetting() {
     return new Promise((resolve) => {
@@ -403,7 +428,7 @@
     });
   }
 
-  // 从 chrome.storage 中异步获取“是否在页面加载时自动调用通义千问生成推广文案”的设置
+  // 从 chrome.storage 中异步获取"是否在页面加载时自动调用通义千问生成推广文案"的设置
   // 出于节省 token 的考虑，默认值为 false
   function getAutoGenerateQwenOnPageLoadSetting() {
     return new Promise((resolve) => {
@@ -412,9 +437,6 @@
         return;
       }
 
-      // 注意：部分上下文（如某些受限页面或特殊 frame）不允许访问 storage，
-      // 会导致出现 “Access to storage is not allowed from this context.” 的 lastError。
-      // 这种情况下我们直接返回默认值 false，并且不在控制台输出错误，以免干扰用户。
       let storageArea = null;
       try {
         // 优先使用 sync，与 options 页面中保存的存储区域保持一致
@@ -422,7 +444,7 @@
           storageArea = chrome.storage.sync;
         } else if (chrome.storage.session && typeof chrome.storage.session.get === 'function') {
           storageArea = chrome.storage.session;
-        } 
+        }
       } catch (_e) {
         resolve(false);
         return;
@@ -436,7 +458,6 @@
       try {
         storageArea.get([AUTO_GENERATE_QWEN_ON_PAGE_LOAD_KEY], (result) => {
           if (chrome.runtime && chrome.runtime.lastError) {
-            // 静默失败：在受限上下文中访问 storage 时会触发 lastError，这里直接回退为默认关闭
             resolve(false);
             return;
           }
@@ -447,27 +468,222 @@
           resolve(Boolean(result[AUTO_GENERATE_QWEN_ON_PAGE_LOAD_KEY]));
         });
       } catch (_e) {
-        // 极端情况下（例如 storageArea 本身在当前上下文不可用）也直接回退默认值
         resolve(false);
       }
     });
+  }
+
+  // 检查当前域名是否在冷却时间内（避免同一域名重复生成）
+  function isUrlInCooldown() {
+    return new Promise((resolve) => {
+      const currentDomain = getCurrentDomain();
+      console.log('[AutoComment] isUrlInCooldown - 当前域名:', currentDomain);
+
+      if (typeof chrome === 'undefined' || !chrome.storage) {
+        console.log('[AutoComment] isUrlInCooldown - chrome.storage 不可用，返回 false');
+        resolve(false);
+        return;
+      }
+
+      let storageArea = null;
+      try {
+        if (chrome.storage.local && typeof chrome.storage.local.get === 'function') {
+          storageArea = chrome.storage.local;
+        }
+      } catch (_e) {
+        console.log('[AutoComment] isUrlInCooldown - 获取 storageArea 失败，返回 false');
+        resolve(false);
+        return;
+      }
+
+      if (!storageArea) {
+        console.log('[AutoComment] isUrlInCooldown - storageArea 为空，返回 false');
+        resolve(false);
+        return;
+      }
+
+      storageArea.get([GENERATION_RECORD_KEY, SUBMIT_COOLDOWN_KEY], (result) => {
+        if (chrome.runtime && chrome.runtime.lastError) {
+          console.log('[AutoComment] isUrlInCooldown - runtime.lastError:', chrome.runtime.lastError);
+          resolve(false);
+          return;
+        }
+
+        console.log('[AutoComment] isUrlInCooldown - 存储中的记录:', JSON.stringify(result));
+
+        const records = result && result[GENERATION_RECORD_KEY];
+        const submitCooldown = result && result[SUBMIT_COOLDOWN_KEY];
+
+        console.log('[AutoComment] isUrlInCooldown - 域名冷却记录:', records ? JSON.stringify(records) : '无');
+        console.log('[AutoComment] isUrlInCooldown - 表单提交冷却:', submitCooldown ? JSON.stringify(submitCooldown) : '无');
+
+        // 检查表单提交冷却（改为检查域名）
+        if (submitCooldown && submitCooldown.domain === currentDomain) {
+          const submitTime = submitCooldown.timestamp || 0;
+          const timeSinceSubmit = Date.now() - submitTime;
+          console.log('[AutoComment] isUrlInCooldown - 距表单提交过去:', timeSinceSubmit, 'ms (冷却时间:', SUBMIT_COOLDOWN_MS, 'ms)');
+          if (timeSinceSubmit < SUBMIT_COOLDOWN_MS) {
+            console.log('[AutoComment] isUrlInCooldown - 表单刚提交，命中冷却，返回 true');
+            resolve(true);
+            return;
+          }
+        }
+
+        // 检查域名冷却时间（改为检查域名）
+        if (records && records[currentDomain] && records[currentDomain].timestamp) {
+          const lastGenTime = records[currentDomain].timestamp;
+          const timeSinceGen = Date.now() - lastGenTime;
+          console.log('[AutoComment] isUrlInCooldown - 距上次生成过去:', timeSinceGen, 'ms (冷却时间:', DOMAIN_COOLDOWN_MS, 'ms)');
+          if (timeSinceGen < DOMAIN_COOLDOWN_MS) {
+            console.log('[AutoComment] isUrlInCooldown - 域名在冷却时间内，返回 true');
+            resolve(true);
+            return;
+          }
+        }
+
+        console.log('[AutoComment] isUrlInCooldown - 未命中冷却，返回 false');
+        resolve(false);
+      });
+    });
+  }
+
+  // 记录当前域名的生成时间戳和内容
+  function recordGenerationTime(content) {
+    return new Promise((resolve) => {
+      const currentDomain = getCurrentDomain();
+
+      if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) {
+        resolve();
+        return;
+      }
+
+      chrome.storage.local.get([GENERATION_RECORD_KEY], (result) => {
+        const records = result && result[GENERATION_RECORD_KEY] || {};
+        records[currentDomain] = {
+          timestamp: Date.now(),
+          content: content || ''
+        };
+
+        // 清理过期的记录（只保留7天内的）
+        const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+        for (const domain in records) {
+          if (records[domain] && records[domain].timestamp < sevenDaysAgo) {
+            delete records[domain];
+          }
+        }
+
+        chrome.storage.local.set({ [GENERATION_RECORD_KEY]: records }, () => {
+          console.log('[AutoComment] 已记录域名生成时间:', currentDomain);
+          resolve();
+        });
+      });
+    });
+  }
+
+  // 记录表单提交事件，设置短期冷却（改为记录域名）
+  function recordFormSubmit() {
+    return new Promise((resolve) => {
+      const currentDomain = getCurrentDomain();
+
+      if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) {
+        resolve();
+        return;
+      }
+
+      chrome.storage.local.set({
+        [SUBMIT_COOLDOWN_KEY]: {
+          domain: currentDomain,
+          timestamp: Date.now()
+        }
+      }, () => {
+        console.log('[AutoComment] 已记录表单提交，短期内刷新页面不会自动生成，域名:', currentDomain);
+        resolve();
+      });
+    });
+  }
+
+  // 获取缓存的推广文案（如果之前生成过）
+  function getCachedPromotionCopy() {
+    return new Promise((resolve) => {
+      const currentDomain = getCurrentDomain();
+
+      if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) {
+        resolve('');
+        return;
+      }
+
+      chrome.storage.local.get([GENERATION_RECORD_KEY], (result) => {
+        const records = result && result[GENERATION_RECORD_KEY];
+        if (records && records[currentDomain] && records[currentDomain].content) {
+          resolve(records[currentDomain].content);
+        } else {
+          resolve('');
+        }
+      });
+    });
+  }
+
+  // 监听表单提交事件
+  function setupFormSubmitListener() {
+    document.addEventListener('submit', (event) => {
+      const form = event.target;
+      // 检查是否是评论/留言相关的表单
+      const isCommentForm = form && (
+        form.id?.toLowerCase().includes('comment') ||
+        form.className?.toLowerCase().includes('comment') ||
+        form.method?.toLowerCase() === 'post'
+      );
+
+      if (isCommentForm) {
+        // 延迟执行，等待表单提交完成后再记录
+        setTimeout(() => {
+          recordFormSubmit();
+        }, 1500);
+      }
+    }, { capture: true });
   }
 
   // 在页面打开时自动调用一次通义千问，生成推广文案并尝试自动填充评论框
   let autoGeneratedOnce = false;
 
   async function autoGeneratePromotionOnPageLoad() {
-    if (autoGeneratedOnce) return;
+    console.log('[AutoComment] === 开始执行 autoGeneratePromotionOnPageLoad ===');
+    console.log('[AutoComment] autoGeneratedOnce 当前值:', autoGeneratedOnce);
+    console.log('[AutoComment] 当前页面URL:', window.location.href);
 
-    // 仅当当前页面能识别出“评论/留言”类文本框时，才会触发自动生成，避免在普通页面浪费 token
+    if (autoGeneratedOnce) {
+      console.log('[AutoComment] 拦截：autoGeneratedOnce 已为 true，跳过生成');
+      return;
+    }
+
+    // 检查URL是否在冷却时间内
+    console.log('[AutoComment] 开始检查冷却时间...');
+    const inCooldown = await isUrlInCooldown();
+    console.log('[AutoComment] 冷却时间检查结果 inCooldown:', inCooldown);
+
+    if (inCooldown) {
+      console.log('[AutoComment] 跳过自动生成：当前URL在冷却时间内');
+      const cachedCopy = await getCachedPromotionCopy();
+      console.log('[AutoComment] 缓存文案内容:', cachedCopy ? '有缓存' : '无缓存');
+      if (cachedCopy) {
+        lastGeneratedPromotionCopy = cachedCopy;
+        tryFillCommentTextareaWithPromotion(cachedCopy);
+        focusCommentTextareaWithPromotion(cachedCopy);
+      }
+      return;
+    }
+
     const hasCommentBox = !!findLikelyCommentTextarea({ allowGenericFallback: false });
+    console.log('[AutoComment] 是否识别到评论框:', hasCommentBox);
     if (!hasCommentBox) {
+      console.log('[AutoComment] 未识别到评论框，跳过生成');
       return;
     }
 
     autoGeneratedOnce = true;
+    console.log('[AutoComment] 设置 autoGeneratedOnce = true，开始生成文案');
 
-    // 如果浮动窗口已打开，则同步显示按钮“生成中”的状态
+    // 如果浮动窗口已打开，则同步显示按钮"生成中"的状态
     if (
       qwenPanelEl &&
       typeof qwenPanelEl._qwenSetGenerateLoading === 'function' &&
@@ -482,8 +698,9 @@
       if (!text) return;
 
       lastGeneratedPromotionCopy = text;
+      await recordGenerationTime(text);
 
-      // 自动填充到页面中识别到的“评论”文本框（仅在目标文本框当前为空时填充）
+      // 自动填充到页面中识别到的"评论"文本框（仅在目标文本框当前为空时填充）
       tryFillCommentTextareaWithPromotion(text);
 
       // 聚焦到评论框，并在需要时填充文案
@@ -524,6 +741,9 @@
   // 初次加载（仅在页面打开/刷新时自动填表一次，并根据设置决定是否自动打开浮动窗口）
   function initOnPageReady() {
     fillInputs();
+    // 设置表单提交监听器
+    setupFormSubmitListener();
+
     getAutoOpenQwenPanelSetting().then((shouldOpen) => {
       if (shouldOpen) {
         createOrToggleQwenPanel();
@@ -544,9 +764,9 @@
     initOnPageReady();
   }
 
-  // 根据页面结构找到一个最有可能是“评论 / 留言”用途的 textarea
+  // 根据页面结构找到一个最有可能是"评论 / 留言"用途的 textarea
   // allowGenericFallback:
-  //   - false：仅在明确识别为“评论/留言”区域时返回（用于是否触发自动生成的判断，避免浪费 token）
+  //   - false：仅在明确识别为"评论/留言"区域时返回（用于是否触发自动生成的判断，避免浪费 token）
   //   - true：在识别失败时退回到页面第一个 textarea，保证在部分网站上尽量可用
   function findLikelyCommentTextarea(options) {
     const allowGenericFallback = options && options.allowGenericFallback;
@@ -630,7 +850,7 @@
     return targetTextarea || null;
   }
 
-  // 尝试根据页面结构找到一个最有可能是“评论 / 留言”用途的 textarea，并在为空时填充推广文案
+  // 尝试根据页面结构找到一个最有可能是"评论 / 留言"用途的 textarea，并在为空时填充推广文案
   function tryFillCommentTextareaWithPromotion(promotionText) {
     if (!promotionText) return;
 
@@ -679,7 +899,7 @@
 
     if (!DASHSCOPE_API_KEY) {
       throw new Error(
-        '尚未配置 DashScope / 通义千问 API Key，请打开扩展的“选项/设置”页面填写 API Key。'
+        '尚未配置 DashScope / 通义千问 API Key，请打开扩展的"选项/设置"页面填写 API Key。'
       );
     }
 
@@ -697,7 +917,7 @@
       bodyText = bodyText.replace(/\s+/g, ' ').trim();
       const MAX_LEN = 4000;
       if (bodyText.length > MAX_LEN) {
-        bodyText = bodyText.slice(0, MAX_LEN) + ' ...（内容已截断）';
+        bodyText = bodyText.slice(0, MAX_LEN) + ' …（内容已截断）';
       }
     }
 
@@ -962,6 +1182,7 @@
         const text = await generatePromotionCopyWithQwen();
         lastGeneratedPromotionCopy = text;
         textarea.value = text;
+        await recordGenerationTime(text);
         setStatus('生成完成，可以复制使用。', '#22c55e');
         setCopyEnabled(true);
         // 生成文案后，自动将焦点移动到页面中的评论框，并在需要时填充文案
@@ -1012,4 +1233,3 @@
     });
   }
 })();
-
