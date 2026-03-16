@@ -3,6 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <title>Auto Register Filler 设置</title>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
     <style>
       body {
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu,
@@ -253,6 +254,59 @@
         <div class="hint">
           - 该开关默认关闭，并且每次重新打开浏览器时都会自动恢复为关闭状态。<br />
           - 仅在勾选后，扩展才会在检测到评论框时自动调用通义千问生成推广文案，以避免在不知情的情况下持续消耗 token。
+        </div>
+      </div>
+
+      <!-- 积分充值区域 -->
+      <div style="margin-top: 24px; padding: 16px; background: linear-gradient(135deg, #fef3c7, #fde68a); border-radius: 12px; border: 1px solid #f59e0b;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+          <label style="margin: 0; color: #92400e;">积分余额</label>
+          <span id="pointsBalance" style="font-size: 18px; font-weight: 700; color: #d97706;">0 积分</span>
+        </div>
+        <div class="hint" style="color: #92400e; margin-bottom: 12px;">
+          - 生成推广文案每次消耗 1 积分<br />
+          - 积分不足时将无法使用AI生成功能
+        </div>
+        <button id="rechargeBtn" class="btn" style="background: #f59e0b; color: white; width: 100%;">
+          充值积分
+        </button>
+      </div>
+
+      <!-- 充值套餐选择 -->
+      <div id="rechargeModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center;">
+        <div style="background: white; border-radius: 12px; padding: 24px; max-width: 400px; width: 90%;">
+          <h3 style="margin: 0 0 16px; font-size: 18px;">选择充值套餐</h3>
+          <div id="rechargeOptions" style="display: flex; flex-direction: column; gap: 12px;">
+            <label style="display: flex; align-items: center; gap: 12px; padding: 12px; border: 2px solid #e5e7eb; border-radius: 8px; cursor: pointer; transition: border-color 0.2s;">
+              <input type="radio" name="rechargePackage" value="10" checked />
+              <span style="flex: 1;">10 积分</span>
+              <span style="color: #6b7280;">¥10</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 12px; padding: 12px; border: 2px solid #e5e7eb; border-radius: 8px; cursor: pointer; transition: border-color 0.2s;">
+              <input type="radio" name="rechargePackage" value="30" />
+              <span style="flex: 1;">30 积分</span>
+              <span style="color: #6b7280;">¥25</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 12px; padding: 12px; border: 2px solid #e5e7eb; border-radius: 8px; cursor: pointer; transition: border-color 0.2s;">
+              <input type="radio" name="rechargePackage" value="100" />
+              <span style="flex: 1;">100 积分</span>
+              <span style="color: #6b7280;">¥70</span>
+            </label>
+          </div>
+          <div style="display: flex; gap: 12px; margin-top: 20px;">
+            <button id="confirmRechargeBtn" class="btn btn-primary" style="flex: 1;">确认充值</button>
+            <button id="cancelRechargeBtn" class="btn btn-secondary" style="flex: 1;">取消</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 支付二维码展示 -->
+      <div id="paymentModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center;">
+        <div style="background: white; border-radius: 12px; padding: 24px; max-width: 360px; width: 90%; text-align: center;">
+          <h3 style="margin: 0 0 16px;">请使用支付宝扫码支付</h3>
+          <div id="qrCodeContainer" style="margin: 16px 0;"></div>
+          <p id="paymentStatus" style="color: #6b7280; font-size: 14px;">等待支付...</p>
+          <button id="closePaymentBtn" class="btn btn-secondary" style="margin-top: 12px;">关闭</button>
         </div>
       </div>
 

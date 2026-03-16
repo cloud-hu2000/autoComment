@@ -1,0 +1,14 @@
+{
+  "name": "auto-comment-backend",
+  "version": "1.0.0",
+  "description": "Auto Comment Filler Backend API",
+  "main": "api/index.js",
+  "scripts": {
+    "start": "node api/index.js"
+  },
+  "dependencies": {
+    "alipay-sdk": "^3.7.0",
+    "@alipay/sdk": "^0.6.1",
+    "uuid": "^9.0.0"
+  }
+}

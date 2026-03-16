@@ -177,5 +177,167 @@ document.addEventListener('DOMContentLoaded', () => {
       showStatus('已清空');
     });
   });
+
+  // ====== 积分充值功能 ======
+  const USER_ID_KEY = 'auto_comment_user_id';
+  const POINTS_API_BASE = 'https://your-project.vercel.app/api';
+
+  // 生成或获取用户ID
+  function getUserId() {
+    return new Promise((resolve) => {
+      chrome.storage.local.get([USER_ID_KEY], (result) => {
+        if (result && result[USER_ID_KEY]) {
+          resolve(result[USER_ID_KEY]);
+        } else {
+          const newUserId = 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+          chrome.storage.local.set({ [USER_ID_KEY]: newUserId }, () => {
+            resolve(newUserId);
+          });
+        }
+      });
+    });
+  }
+
+  // 查询积分余额
+  async function fetchPointsBalance() {
+    const userId = await getUserId();
+    try {
+      const response = await fetch(`${POINTS_API_BASE}/get-points?userId=${encodeURIComponent(userId)}`);
+      const data = await response.json();
+      if (data.success) {
+        document.getElementById('pointsBalance').textContent = `${data.points} 积分`;
+        return data.points;
+      }
+    } catch (error) {
+      console.error('查询积分失败:', error);
+    }
+    document.getElementById('pointsBalance').textContent = '0 积分';
+    return 0;
+  }
+
+  // 创建订单
+  async function createRechargeOrder(points, amount) {
+    const userId = await getUserId();
+    try {
+      const response = await fetch(`${POINTS_API_BASE}/create-order`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, points, amount })
+      });
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error('创建订单失败:', error);
+      return { error: '创建订单失败' };
+    }
+  }
+
+  // 检查订单支付状态
+  async function checkOrderPayment(orderId) {
+    const userId = await getUserId();
+    try {
+      const response = await fetch(`${POINTS_API_BASE}/check-order?orderId=${encodeURIComponent(orderId)}&userId=${encodeURIComponent(userId)}`);
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      console.error('检查订单失败:', error);
+      return { success: false };
+    }
+  }
+
+  // 充值套餐价格映射
+  const PACKAGE_PRICES = {
+    '10': 10,
+    '30': 25,
+    '100': 70
+  };
+
+  // 初始化积分余额显示
+  fetchPointsBalance();
+
+  // 充值按钮
+  const rechargeBtn = document.getElementById('rechargeBtn');
+  const rechargeModal = document.getElementById('rechargeModal');
+  const paymentModal = document.getElementById('paymentModal');
+  const confirmRechargeBtn = document.getElementById('confirmRechargeBtn');
+  const cancelRechargeBtn = document.getElementById('cancelRechargeBtn');
+  const closePaymentBtn = document.getElementById('closePaymentBtn');
+  const qrCodeContainer = document.getElementById('qrCodeContainer');
+  const paymentStatus = document.getElementById('paymentStatus');
+
+  if (rechargeBtn && rechargeModal) {
+    rechargeBtn.addEventListener('click', () => {
+      rechargeModal.style.display = 'flex';
+    });
+
+    cancelRechargeBtn.addEventListener('click', () => {
+      rechargeModal.style.display = 'none';
+    });
+
+    confirmRechargeBtn.addEventListener('click', async () => {
+      const selectedPackage = document.querySelector('input[name="rechargePackage"]:checked');
+      if (!selectedPackage) {
+        alert('请选择充值套餐');
+        return;
+      }
+
+      const points = parseInt(selectedPackage.value);
+      const amount = PACKAGE_PRICES[selectedPackage.value];
+
+      rechargeModal.style.display = 'none';
+      paymentModal.style.display = 'flex';
+      paymentStatus.textContent = '正在创建订单...';
+      qrCodeContainer.innerHTML = '';
+
+      const orderData = await createRechargeOrder(points, amount);
+
+      if (orderData.error) {
+        paymentStatus.textContent = '创建订单失败: ' + orderData.error;
+        return;
+      }
+
+      if (orderData.payUrl) {
+        // 生成二维码
+        try {
+          await QRCode.toCanvas(qrCodeContainer.appendChild(document.createElement('canvas')), orderData.payUrl, {
+            width: 200,
+            margin: 2
+          });
+          paymentStatus.textContent = '请使用支付宝扫码支付';
+
+          // 轮询检查支付状态
+          const checkPayment = async () => {
+            const result = await checkOrderPayment(orderData.orderId);
+            if (result.success && result.paid) {
+              paymentStatus.textContent = '支付成功！';
+              paymentStatus.style.color = '#22c55e';
+              setTimeout(() => {
+                paymentModal.style.display = 'none';
+                fetchPointsBalance();
+              }, 1500);
+            } else if (result.success === false && result.error === '订单不存在') {
+              paymentStatus.textContent = '订单已取消';
+              setTimeout(() => {
+                paymentModal.style.display = 'none';
+              }, 1500);
+            } else {
+              // 继续轮询（最多60秒）
+              setTimeout(checkPayment, 2000);
+            }
+          };
+
+          // 启动轮询
+          setTimeout(checkPayment, 2000);
+        } catch (error) {
+          console.error('生成二维码失败:', error);
+          paymentStatus.textContent = '生成支付码失败';
+        }
+      }
+    });
+
+    closePaymentBtn.addEventListener('click', () => {
+      paymentModal.style.display = 'none';
+    });
+  }
 });
 

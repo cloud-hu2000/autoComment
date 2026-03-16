@@ -251,6 +251,11 @@
   const USER_EMAIL_STORAGE_KEY = 'auto_fill_user_email';
   const USER_PASSWORD_STORAGE_KEY = 'auto_fill_user_password';
 
+  // ====== 积分系统配置 ======
+  const USER_ID_KEY = 'auto_comment_user_id';
+  const POINTS_API_BASE = 'https://your-project.vercel.app/api';
+  const POINTS_COST_PER_GENERATION = 1; // 每次生成消耗1积分
+
   // ====== 防重复生成配置 ======
   // 冷却时间：同一域名在24小时内不重复生成推广文案（单位：毫秒）
   const DOMAIN_COOLDOWN_MS = 24 * 60 * 60 * 1000;
@@ -273,6 +278,52 @@
   // 获取当前页面的域名
   function getCurrentDomain() {
     return extractDomain(window.location.href);
+  }
+
+  // ====== 积分系统函数 ======
+  // 生成或获取用户ID
+  function getUserId() {
+    return new Promise((resolve) => {
+      chrome.storage.local.get([USER_ID_KEY], (result) => {
+        if (result && result[USER_ID_KEY]) {
+          resolve(result[USER_ID_KEY]);
+        } else {
+          const newUserId = 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+          chrome.storage.local.set({ [USER_ID_KEY]: newUserId });
+          resolve(newUserId);
+        }
+      });
+    });
+  }
+
+  // 查询积分余额
+  async function getPointsBalance() {
+    const userId = await getUserId();
+    try {
+      const response = await fetch(`${POINTS_API_BASE}/get-points?userId=${encodeURIComponent(userId)}`);
+      const data = await response.json();
+      return data.success ? data.points : 0;
+    } catch (e) {
+      console.error('查询积分失败:', e);
+      return 0;
+    }
+  }
+
+  // 扣减积分
+  async function deductPoints(points) {
+    const userId = await getUserId();
+    try {
+      const response = await fetch(`${POINTS_API_BASE}/deduct-points`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, points })
+      });
+      const data = await response.json();
+      return data;
+    } catch (e) {
+      console.error('扣减积分失败:', e);
+      return { success: false, error: e.message };
+    }
   }
 
   // 最近一次通义千问生成的推广文案（用于页面自动填充 & 浮动窗口回显）
@@ -902,6 +953,21 @@
         '尚未配置 DashScope / 通义千问 API Key，请打开扩展的"选项/设置"页面填写 API Key。'
       );
     }
+
+    // 检查积分是否充足
+    const currentPoints = await getPointsBalance();
+    if (currentPoints < POINTS_COST_PER_GENERATION) {
+      throw new Error(
+        `积分不足！当前积分: ${currentPoints}，生成一次需要 ${POINTS_COST_PER_GENERATION} 积分。请到扩展选项页面充值。`
+      );
+    }
+
+    // 扣减积分
+    const deductResult = await deductPoints(POINTS_COST_PER_GENERATION);
+    if (!deductResult.success) {
+      throw new Error(`扣减积分失败: ${deductResult.error || '未知错误'}`);
+    }
+    console.log(`[积分] 扣减 ${POINTS_COST_PER_GENERATION} 积分，剩余 ${deductResult.remainingPoints} 积分`);
 
     const websiteUrl = window.location.href || '';
     const title = document.title || '';
