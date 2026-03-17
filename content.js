@@ -120,15 +120,42 @@
       const forms = Array.from(document.querySelectorAll('form'));
       forms.forEach((form) => {
         const text = (form.textContent || '').toLowerCase();
+        const className = (form.className || '').toLowerCase();
+        const id = (form.id || '').toLowerCase();
+
+        // 关键字匹配
         const keywords = [
           'deja una respuesta',
           'deja un comentario',
           'tu dirección de correo electrónico no será publicada',
           'comentario *',
           'leave a reply',
-          'leave a comment'
+          'leave a comment',
+          'post comment',
+          'submit comment',
+          'reply',
+          'respond',
+          '评论',
+          '留言',
+          '回复'
         ];
-        if (keywords.some((k) => text.includes(k))) {
+
+        // WordPress 站点特殊类名匹配
+        const wpClassNames = ['comment-form', 'commentform', 'respond', 'comment-respond'];
+
+        if (keywords.some((k) => text.includes(k)) ||
+            wpClassNames.some(c => className.includes(c) || id.includes(c))) {
+          commentForms.add(form);
+        }
+      });
+    }
+
+    // 兜底2：如果仍然没有识别到，尝试通过 CSS 类名和 ID 查找评论区域
+    if (commentForms.size === 0) {
+      const commentAreas = document.querySelectorAll('#comments, .comments, .comment-section, #respond, .respond, .reply');
+      commentAreas.forEach(area => {
+        const form = area.closest('form');
+        if (form) {
           commentForms.add(form);
         }
       });
@@ -256,6 +283,10 @@
   const POINTS_API_BASE = 'https://your-project.vercel.app/api';
   const POINTS_COST_PER_GENERATION = 1; // 每次生成消耗1积分
 
+  // ====== 开发者调试模式 ======
+  const DEV_MODE = true; // 开发者模式：开启后积分固定为 1000
+  const DEV_POINTS = 1000;
+
   // ====== 防重复生成配置 ======
   // 冷却时间：同一域名在24小时内不重复生成推广文案（单位：毫秒）
   const DOMAIN_COOLDOWN_MS = 24 * 60 * 60 * 1000;
@@ -281,23 +312,90 @@
   }
 
   // ====== 积分系统函数 ======
-  // 生成或获取用户ID
-  function getUserId() {
+  // 生成设备指纹作为用户ID（不可篡改）
+  async function getUserId() {
+    // 先检查本地是否已有设备指纹
     return new Promise((resolve) => {
       chrome.storage.local.get([USER_ID_KEY], (result) => {
         if (result && result[USER_ID_KEY]) {
           resolve(result[USER_ID_KEY]);
         } else {
-          const newUserId = 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-          chrome.storage.local.set({ [USER_ID_KEY]: newUserId });
-          resolve(newUserId);
+          // 生成设备指纹
+          generateDeviceFingerprint().then(fingerprint => {
+            chrome.storage.local.set({ [USER_ID_KEY]: fingerprint });
+            resolve(fingerprint);
+          });
         }
       });
     });
   }
 
+  // 生成设备指纹
+  async function generateDeviceFingerprint() {
+    const features = [
+      screen.width + 'x' + screen.height + 'x' + screen.colorDepth,
+      Intl.DateTimeFormat().resolvedOptions().timeZone,
+      navigator.language,
+      navigator.platform,
+      navigator.hardwareConcurrency || '',
+      navigator.deviceMemory || '',
+      await getCanvasFingerprint(),
+      getWebGLRenderer()
+    ];
+    const fingerprint = await sha256(features.join('|'));
+    return 'device_' + fingerprint.substr(0, 32);
+  }
+
+  function getCanvasFingerprint() {
+    return new Promise((resolve) => {
+      try {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        ctx.textBaseline = 'top';
+        ctx.font = '14px Arial';
+        ctx.fillStyle = '#f60';
+        ctx.fillRect(125, 1, 62, 20);
+        ctx.fillStyle = '#069';
+        ctx.fillText('AutoComment', 2, 15);
+        ctx.fillStyle = 'rgba(102, 204, 0, 0.7)';
+        ctx.fillText('AutoComment', 4, 17);
+        const dataURL = canvas.toDataURL();
+        sha256(dataURL).then(hash => resolve(hash.substr(0, 16)));
+      } catch (e) {
+        resolve('fallback');
+      }
+    });
+  }
+
+  function getWebGLRenderer() {
+    try {
+      const canvas = document.createElement('canvas');
+      const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+      if (!gl) return '';
+      const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+      if (!debugInfo) return '';
+      const vendor = gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL);
+      const renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+      return vendor + '|' + renderer;
+    } catch (e) {
+      return '';
+    }
+  }
+
+  async function sha256(message) {
+    const msgBuffer = new TextEncoder().encode(message);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
   // 查询积分余额
   async function getPointsBalance() {
+    // 开发者模式：直接返回固定积分
+    if (DEV_MODE) {
+      return DEV_POINTS;
+    }
+
     const userId = await getUserId();
     try {
       const response = await fetch(`${POINTS_API_BASE}/get-points?userId=${encodeURIComponent(userId)}`);
@@ -311,6 +409,11 @@
 
   // 扣减积分
   async function deductPoints(points) {
+    // 开发者模式：跳过扣减，直接返回成功
+    if (DEV_MODE) {
+      return { success: true, remainingPoints: DEV_POINTS };
+    }
+
     const userId = await getUserId();
     try {
       const response = await fetch(`${POINTS_API_BASE}/deduct-points`, {
@@ -807,6 +910,54 @@
         autoGeneratePromotionOnPageLoad();
       }
     });
+
+    // 监听动态加载的评论框（很多网站用 Ajax 加载评论区域）
+    observeDynamicElements();
+  }
+
+  // 监听 DOM 变化，检测动态加载的评论框
+  let hasNotifiedCommentBox = false;
+  let hasCheckedInitialCommentBox = false;
+  function observeDynamicElements() {
+    // 首次检查：延迟 1 秒后检查评论框（等待动态加载）
+    setTimeout(() => {
+      if (!hasCheckedInitialCommentBox) {
+        hasCheckedInitialCommentBox = true;
+        const hasCommentBox = !!findLikelyCommentTextarea({ allowGenericFallback: false });
+        console.log('[AutoComment] 延迟检查 - 是否识别到评论框:', hasCommentBox);
+        if (hasCommentBox && !hasNotifiedCommentBox) {
+          hasNotifiedCommentBox = true;
+          getAutoGenerateQwenOnPageLoadSetting().then((shouldAutoGenerate) => {
+            if (shouldAutoGenerate && !autoGeneratedOnce) {
+              autoGeneratePromotionOnPageLoad();
+            }
+          });
+        }
+      }
+    }, 1000);
+
+    const observer = new MutationObserver((mutations) => {
+      // 检查是否有新的 textarea 或评论区域出现
+      const newTextareas = document.querySelectorAll('textarea');
+      if (newTextareas.length > 0 && !hasNotifiedCommentBox) {
+        const hasCommentBox = !!findLikelyCommentTextarea({ allowGenericFallback: false });
+        console.log('[AutoComment] MutationObserver 检测到评论框:', hasCommentBox);
+        if (hasCommentBox) {
+          hasNotifiedCommentBox = true;
+          // 重新尝试自动生成
+          getAutoGenerateQwenOnPageLoadSetting().then((shouldAutoGenerate) => {
+            if (shouldAutoGenerate && !autoGeneratedOnce) {
+              autoGeneratePromotionOnPageLoad();
+            }
+          });
+        }
+      }
+    });
+
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true
+    });
   }
 
   if (document.readyState === 'loading') {
@@ -832,6 +983,8 @@
       const id = (ta.id || '').toLowerCase();
       const placeholder = (ta.placeholder || '').toLowerCase();
       const text = `${name} ${id} ${placeholder}`;
+      console.log('[AutoComment] 检测 textarea:', { name, id, placeholder, text });
+
       const keywords = [
         'comment',
         'comentario',
@@ -850,6 +1003,7 @@
         '回复'
       ];
       if (keywords.some((k) => text.includes(k))) {
+        console.log('[AutoComment] 匹配到评论 textarea:', ta);
         commentTextareas.push(ta);
         const form = ta.form || (ta.closest && ta.closest('form'));
         if (form) {
@@ -954,20 +1108,24 @@
       );
     }
 
-    // 检查积分是否充足
-    const currentPoints = await getPointsBalance();
-    if (currentPoints < POINTS_COST_PER_GENERATION) {
-      throw new Error(
-        `积分不足！当前积分: ${currentPoints}，生成一次需要 ${POINTS_COST_PER_GENERATION} 积分。请到扩展选项页面充值。`
-      );
-    }
+    // 检查积分是否充足（开发者模式跳过检查）
+    if (!DEV_MODE) {
+      const currentPoints = await getPointsBalance();
+      if (currentPoints < POINTS_COST_PER_GENERATION) {
+        throw new Error(
+          `积分不足！当前积分: ${currentPoints}，生成一次需要 ${POINTS_COST_PER_GENERATION} 积分。请到扩展选项页面充值。`
+        );
+      }
 
-    // 扣减积分
-    const deductResult = await deductPoints(POINTS_COST_PER_GENERATION);
-    if (!deductResult.success) {
-      throw new Error(`扣减积分失败: ${deductResult.error || '未知错误'}`);
+      // 扣减积分
+      const deductResult = await deductPoints(POINTS_COST_PER_GENERATION);
+      if (!deductResult.success) {
+        throw new Error(`扣减积分失败: ${deductResult.error || '未知错误'}`);
+      }
+      console.log(`[积分] 扣减 ${POINTS_COST_PER_GENERATION} 积分，剩余 ${deductResult.remainingPoints} 积分`);
+    } else {
+      console.log(`[积分] 开发者模式：跳过积分检查和扣减`);
     }
-    console.log(`[积分] 扣减 ${POINTS_COST_PER_GENERATION} 积分，剩余 ${deductResult.remainingPoints} 积分`);
 
     const websiteUrl = window.location.href || '';
     const title = document.title || '';

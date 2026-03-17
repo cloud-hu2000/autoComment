@@ -182,24 +182,111 @@ document.addEventListener('DOMContentLoaded', () => {
   const USER_ID_KEY = 'auto_comment_user_id';
   const POINTS_API_BASE = 'https://your-project.vercel.app/api';
 
-  // 生成或获取用户ID
-  function getUserId() {
+  // ====== 开发者调试模式 ======
+  const DEV_MODE = true; // 开发者模式：开启后积分固定为 1000
+  const DEV_POINTS = 1000;
+
+  // 生成设备指纹作为用户ID（不可篡改）
+  async function getUserId() {
+    // 先检查本地是否已有设备指纹
     return new Promise((resolve) => {
       chrome.storage.local.get([USER_ID_KEY], (result) => {
         if (result && result[USER_ID_KEY]) {
           resolve(result[USER_ID_KEY]);
         } else {
-          const newUserId = 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-          chrome.storage.local.set({ [USER_ID_KEY]: newUserId }, () => {
-            resolve(newUserId);
+          // 生成设备指纹
+          generateDeviceFingerprint().then(fingerprint => {
+            chrome.storage.local.set({ [USER_ID_KEY]: fingerprint }, () => {
+              resolve(fingerprint);
+            });
           });
         }
       });
     });
   }
 
+  // 生成设备指纹
+  async function generateDeviceFingerprint() {
+    // 收集多个浏览器特征
+    const features = [
+      // 屏幕信息
+      screen.width + 'x' + screen.height + 'x' + screen.colorDepth,
+      // 时区
+      Intl.DateTimeFormat().resolvedOptions().timeZone,
+      // 语言
+      navigator.language,
+      // 平台
+      navigator.platform,
+      // 硬件并发数
+      navigator.hardwareConcurrency || '',
+      // 设备内存
+      navigator.deviceMemory || '',
+      // Canvas 指纹（通过 Canvas 渲染生成的哈希）
+      await getCanvasFingerprint(),
+      // WebGL 渲染器
+      getWebGLRenderer()
+    ];
+
+    // 将特征组合并计算 SHA-256 哈希
+    const fingerprint = await sha256(features.join('|'));
+    return 'device_' + fingerprint.substr(0, 32);
+  }
+
+  // 获取 Canvas 指纹
+  function getCanvasFingerprint() {
+    return new Promise((resolve) => {
+      try {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        ctx.textBaseline = 'top';
+        ctx.font = '14px Arial';
+        ctx.fillStyle = '#f60';
+        ctx.fillRect(125, 1, 62, 20);
+        ctx.fillStyle = '#069';
+        ctx.fillText('AutoComment', 2, 15);
+        ctx.fillStyle = 'rgba(102, 204, 0, 0.7)';
+        ctx.fillText('AutoComment', 4, 17);
+        const dataURL = canvas.toDataURL();
+        // 取哈希值
+        sha256(dataURL).then(hash => resolve(hash.substr(0, 16)));
+      } catch (e) {
+        resolve('fallback');
+      }
+    });
+  }
+
+  // 获取 WebGL 渲染器信息
+  function getWebGLRenderer() {
+    try {
+      const canvas = document.createElement('canvas');
+      const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+      if (!gl) return '';
+      const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+      if (!debugInfo) return '';
+      const vendor = gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL);
+      const renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+      return vendor + '|' + renderer;
+    } catch (e) {
+      return '';
+    }
+  }
+
+  // SHA-256 哈希函数
+  async function sha256(message) {
+    const msgBuffer = new TextEncoder().encode(message);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
   // 查询积分余额
   async function fetchPointsBalance() {
+    // 开发者模式：直接返回固定积分
+    if (DEV_MODE) {
+      document.getElementById('pointsBalance').textContent = `${DEV_POINTS} 积分`;
+      return DEV_POINTS;
+    }
+
     const userId = await getUserId();
     try {
       const response = await fetch(`${POINTS_API_BASE}/get-points?userId=${encodeURIComponent(userId)}`);
@@ -245,11 +332,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // 充值套餐价格映射
+  // 充值套餐价格映射 (价格: 积分数量)
   const PACKAGE_PRICES = {
-    '10': 10,
-    '30': 25,
-    '100': 70
+    '200': 9.9,
+    '500': 19.9,
+    '2000': 49.9
   };
 
   // 初始化积分余额显示

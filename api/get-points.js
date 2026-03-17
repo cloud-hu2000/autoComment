@@ -1,8 +1,9 @@
 const { users } = require('./storage');
 
 /**
- * 查询积分余额
+ * 查询/初始化外链余额
  * GET /api/get-points?userId=xxx
+ * 新用户初始赠送10个外链
  */
 module.exports = async function getPoints(req, res, query) {
   const { userId } = query;
@@ -13,7 +14,13 @@ module.exports = async function getPoints(req, res, query) {
     return;
   }
 
-  const points = users.get(userId) || 0;
+  let points = users.get(userId);
+
+  // 新用户初始赠送10个外链
+  if (points === undefined) {
+    points = 10;
+    users.set(userId, points);
+  }
 
   res.writeHead(200);
   res.end(JSON.stringify({
