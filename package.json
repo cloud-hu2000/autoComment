@@ -7,7 +7,7 @@
     "start": "node api/index.js"
   },
   "dependencies": {
-    "alipay-sdk": "^3.7.0",
+    "alipay-sdk": "^4.14.0",
     "uuid": "^9.0.0"
   }
 }
