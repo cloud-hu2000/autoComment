@@ -1446,6 +1446,231 @@
         setStatus('复制失败，请手动选择文本复制。', '#f97373');
       }
     });
+
+    // ====== 外链分析功能 ======
+    function analyzeOutlinks() {
+      const currentHost = window.location.hostname;
+      const links = Array.from(document.querySelectorAll('a[href]'));
+
+      const outlinks = links
+        .map(link => {
+          const href = link.href;
+          try {
+            const url = new URL(href);
+            // 排除锚点链接、邮件、电话等
+            if (url.protocol === 'mailto:' ||
+                url.protocol === 'tel:' ||
+                url.protocol === 'javascript:' ||
+                href.startsWith('#')) {
+              return null;
+            }
+            // 排除站内链接
+            if (url.hostname === currentHost || url.hostname.endsWith('.' + currentHost)) {
+              return null;
+            }
+            // 检测 nofollow
+            const rel = (link.rel || '').toLowerCase();
+            const isNofollow = rel.includes('nofollow');
+            const isDofollow = rel.includes('dofollow') || !isNofollow;
+
+            return {
+              url: href,
+              text: link.textContent?.trim() || link.innerText?.trim() || '',
+              host: url.hostname,
+              isNofollow,
+              isDofollow
+            };
+          } catch (e) {
+            return null;
+          }
+        })
+        .filter(Boolean);
+
+      // 去重
+      const seen = new Set();
+      const uniqueOutlinks = outlinks.filter(link => {
+        if (seen.has(link.url)) return false;
+        seen.add(link.url);
+        return true;
+      });
+
+      return uniqueOutlinks;
+    }
+
+    function showOutlinksPanel() {
+      // 移除已存在的面板
+      const existing = document.getElementById('auto-comment-outlinks-panel');
+      if (existing) existing.remove();
+
+      const outlinks = analyzeOutlinks();
+      const dofollowCount = outlinks.filter(l => l.isDofollow).length;
+      const nofollowCount = outlinks.filter(l => l.isNofollow).length;
+
+      const panel = document.createElement('div');
+      panel.id = 'auto-comment-outlinks-panel';
+      panel.style.position = 'fixed';
+      panel.style.left = '50%';
+      panel.style.top = '50%';
+      panel.style.transform = 'translate(-50%, -50%)';
+      panel.style.width = '600px';
+      panel.style.maxWidth = '90vw';
+      panel.style.maxHeight = '80vh';
+      panel.style.zIndex = '2147483647';
+      panel.style.background = 'rgba(15,23,42,0.98)';
+      panel.style.color = '#e5e7eb';
+      panel.style.borderRadius = '12px';
+      panel.style.boxShadow = '0 18px 45px rgba(15,23,42,0.55)';
+      panel.style.fontFamily = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif";
+      panel.style.display = 'flex';
+      panel.style.flexDirection = 'column';
+      panel.style.overflow = 'hidden';
+
+      // Header
+      const header = document.createElement('div');
+      header.style.display = 'flex';
+      header.style.alignItems = 'center';
+      header.style.justifyContent = 'space-between';
+      header.style.padding = '12px 16px';
+      header.style.borderBottom = '1px solid rgba(148,163,184,0.25)';
+
+      const title = document.createElement('div');
+      title.style.fontSize = '14px';
+      title.style.fontWeight = '600';
+      title.textContent = `外链分析 - 共 ${outlinks.length} 个`;
+
+      const closeBtn = document.createElement('button');
+      closeBtn.textContent = '×';
+      closeBtn.style.border = 'none';
+      closeBtn.style.background = 'transparent';
+      closeBtn.style.color = '#9ca3af';
+      closeBtn.style.cursor = 'pointer';
+      closeBtn.style.fontSize = '18px';
+      closeBtn.addEventListener('click', () => panel.remove());
+
+      header.appendChild(title);
+      header.appendChild(closeBtn);
+
+      // Stats
+      const stats = document.createElement('div');
+      stats.style.display = 'flex';
+      stats.style.gap = '16px';
+      stats.style.padding = '10px 16px';
+      stats.style.fontSize = '12px';
+      stats.style.borderBottom = '1px solid rgba(148,163,184,0.15)';
+
+      const dofollowStat = document.createElement('span');
+      dofollowStat.innerHTML = `<span style="color:#22c55e;font-weight:600">✓ DoFollow:</span> ${dofollowCount}`;
+      const nofollowStat = document.createElement('span');
+      nofollowStat.innerHTML = `<span style="color:#f97373;font-weight:600">✗ NoFollow:</span> ${nofollowCount}`;
+
+      stats.appendChild(dofollowStat);
+      stats.appendChild(nofollowStat);
+
+      // List
+      const list = document.createElement('div');
+      list.style.flex = '1';
+      list.style.overflowY = 'auto';
+      list.style.padding = '8px';
+
+      if (outlinks.length === 0) {
+        list.innerHTML = '<div style="text-align:center;color:#9ca3af;padding:20px">未检测到外链</div>';
+      } else {
+        outlinks.forEach(link => {
+          const item = document.createElement('div');
+          item.style.display = 'flex';
+          item.style.alignItems = 'center';
+          item.style.gap = '8px';
+          item.style.padding = '6px 8px';
+          item.style.borderRadius = '6px';
+          item.style.fontSize = '11px';
+          item.style.wordBreak = 'break-all';
+
+          const tag = document.createElement('span');
+          tag.style.flexShrink = '0';
+          tag.style.padding = '2px 6px';
+          tag.style.borderRadius = '4px';
+          tag.style.fontSize = '10px';
+          tag.style.fontWeight = '600';
+
+          if (link.isDofollow) {
+            tag.style.background = 'rgba(34,197,94,0.2)';
+            tag.style.color = '#22c55e';
+            tag.textContent = 'DoFollow';
+          } else {
+            tag.style.background = 'rgba(249,115,115,0.2)';
+            tag.style.color = '#f97373';
+            tag.textContent = 'NoFollow';
+          }
+
+          const linkEl = document.createElement('a');
+          linkEl.href = link.url;
+          linkEl.textContent = link.host;
+          linkEl.style.color = '#60a5fa';
+          linkEl.style.textDecoration = 'none';
+          linkEl.target = '_blank';
+
+          item.appendChild(tag);
+          item.appendChild(linkEl);
+          list.appendChild(item);
+        });
+      }
+
+      // Export button
+      const exportBtn = document.createElement('button');
+      exportBtn.textContent = '导出 CSV';
+      exportBtn.style.margin = '12px 16px';
+      exportBtn.style.padding = '8px 16px';
+      exportBtn.style.border = 'none';
+      exportBtn.style.borderRadius = '6px';
+      exportBtn.style.background = 'linear-gradient(135deg, #2563eb, #4f46e5)';
+      exportBtn.style.color = '#fff';
+      exportBtn.style.fontSize = '12px';
+      exportBtn.style.cursor = 'pointer';
+      exportBtn.addEventListener('click', () => {
+        const csvHost = window.location.hostname;
+        const csvContent = [
+          ['URL', 'Hostname', 'Type', 'Link Text'].join(','),
+          ...outlinks.map(l => [
+            `"${l.url.replace(/"/g, '""')}"`,
+            `"${l.host}"`,
+            l.isDofollow ? 'DoFollow' : 'NoFollow',
+            `"${l.text.replace(/"/g, '""')}"`
+          ].join(','))
+        ].join('\n');
+
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `outlinks-${csvHost}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+      });
+
+      panel.appendChild(header);
+      panel.appendChild(stats);
+      panel.appendChild(list);
+      panel.appendChild(exportBtn);
+      document.body.appendChild(panel);
+    }
+
+    // 外链分析按钮
+    const outlinkBtn = document.createElement('button');
+    outlinkBtn.textContent = '分析外链';
+    outlinkBtn.style.border = 'none';
+    outlinkBtn.style.borderRadius = '999px';
+    outlinkBtn.style.padding = '7px 10px';
+    outlinkBtn.style.fontSize = '12px';
+    outlinkBtn.style.cursor = 'pointer';
+    outlinkBtn.style.background = 'rgba(15,23,42,0.8)';
+    outlinkBtn.style.color = '#e5e7eb';
+    outlinkBtn.style.border = '1px solid rgba(148,163,184,0.6)';
+    outlinkBtn.addEventListener('click', showOutlinksPanel);
+
+    btnRow.appendChild(generateBtn);
+    btnRow.appendChild(outlinkBtn);
+    btnRow.appendChild(copyBtn);
+
   }
 
   // 监听 background.js 中点击扩展图标发送的消息，打开/关闭浮动窗口
