@@ -1,4 +1,5 @@
 // 阿里云服务器部署入口
+require('dotenv').config();
 const express = require('express');
 const path = require('path');
 
