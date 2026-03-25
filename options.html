@@ -138,7 +138,7 @@
     <div class="container">
       <h1>Auto Register Filler 设置</h1>
       <div class="subtitle">
-        在这里安全地保存你的 DashScope / 通义千问 API Key，并自定义网站推广 Skill 语言模板。
+        在这里配置通义千问生成文案所使用的 Skill 语言模板，以及其他个性化设置。
       </div>
 
       <!-- 用户ID区域 -->
@@ -166,17 +166,6 @@
       </div>
 
       <div>
-        <label for="apiKey">DashScope / 通义千问 API Key</label>
-        <input type="password" id="apiKey" placeholder="sk-..." autocomplete="off" />
-        <div class="hint">
-          - 只保存在浏览器的
-          <strong>chrome.storage.sync</strong>
-          中，本扩展不会上传到任何第三方服务器。<br />
-          - 修改后，重新打开页面或重新触发右键菜单即可生效。
-        </div>
-      </div>
-
-      <div style="margin-top: 20px">
         <label for="skillTemplate">通义千问 Skill 语言模板（system 提示词）</label>
         <textarea
           id="skillTemplate"
@@ -194,7 +183,7 @@
         ></textarea>
         <div class="hint">
           - 支持多行文本，将作为调用通义千问时的 <strong>system</strong> 提示词。<br />
-          - 为空时会使用扩展内置的默认模板；修改后立即生效。
+          - 为空时会使用内置默认模板；修改后立即生效。
         </div>
       </div>
 
@@ -282,7 +271,6 @@
 
       <div class="row">
         <button id="saveBtn" class="btn btn-primary">保存</button>
-        <button id="clearBtn" class="btn btn-secondary">清空 API Key</button>
         <span id="status" class="status">已保存</span>
       </div>
 

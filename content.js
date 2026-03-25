@@ -255,9 +255,8 @@
     input.dispatchEvent(new Event('change', { bubbles: true }));
   }
 
-  // ====== 通义千问：网站推广 Skill 与调用 ======
-  const API_KEY_STORAGE_KEY = 'dashscope_api_key';
-  const SKILL_TEMPLATE_STORAGE_KEY = 'qwen_skill_template';
+  // ====== 通义千问后端配置 ======
+  const QWEN_API_BASE = 'https://auto-comment-beta.vercel.app/api';
   const WEBSITE_URL_STORAGE_KEY = 'promotion_website_url';
   const AUTO_OPEN_QWEN_PANEL_KEY = 'auto_open_qwen_panel';
   const AUTO_GENERATE_QWEN_ON_PAGE_LOAD_KEY = 'auto_generate_qwen_on_page_load';
@@ -364,28 +363,6 @@
     '3. 语气可以专业但要自然、真实，避免夸张、虚假宣传。',
     '4. 使用英文输出，字数建议控制在 100-200词。'
   ].join('\n');
-
-  // 从 chrome.storage.sync 中异步获取 DashScope / 通义千问 API Key
-  function getDashScopeApiKey() {
-    return new Promise((resolve) => {
-      if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.sync) {
-        resolve('');
-        return;
-      }
-      chrome.storage.sync.get([API_KEY_STORAGE_KEY], (result) => {
-        if (chrome.runtime && chrome.runtime.lastError) {
-          console.error('读取 DashScope API Key 失败：', chrome.runtime.lastError);
-          resolve('');
-          return;
-        }
-        const key =
-          result && typeof result[API_KEY_STORAGE_KEY] === 'string'
-            ? result[API_KEY_STORAGE_KEY]
-            : '';
-        resolve(key.trim());
-      });
-    });
-  }
 
   // 从 chrome.storage.sync 中异步获取 Skill 模板
   function getQwenSkillTemplate() {
@@ -932,16 +909,9 @@
     }
   }
 
-  // 收集当前页面内容 + 调用通义千问生成推广文案
+  // 收集当前页面内容 + 调用后端生成推广文案
   async function generatePromotionCopyWithQwen() {
-    const DASHSCOPE_API_KEY = await getDashScopeApiKey();
     const QWEN_SKILL_TEMPLATE = await getQwenSkillTemplate();
-
-    if (!DASHSCOPE_API_KEY) {
-      throw new Error(
-        '尚未配置 DashScope / 通义千问 API Key，请打开扩展的"选项/设置"页面填写 API Key。'
-      );
-    }
 
     // 检查用户ID是否配置
     const userId = await getUserId();
@@ -951,18 +921,12 @@
       );
     }
 
-    // 检查积分是否充足
+    // 扣减积分（在后端一并完成，此处仅做友好提示）
     const currentPoints = await getPointsBalance();
     if (currentPoints < POINTS_COST_PER_GENERATION) {
       throw new Error(
         `积分不足！当前积分: ${currentPoints}，生成一次需要 ${POINTS_COST_PER_GENERATION} 积分。请联系管理员充值。`
       );
-    }
-
-    // 扣减积分
-    const deductResult = await deductPoints(POINTS_COST_PER_GENERATION);
-    if (!deductResult.success) {
-      throw new Error(`扣减积分失败: ${deductResult.error || '未知错误'}`);
     }
 
     const websiteUrl = window.location.href || '';
@@ -982,57 +946,29 @@
       }
     }
 
-    const websiteContent = [
-      `【网站标题】${title}`,
-      `【网站 URL】${websiteUrl}`,
-      description ? `【网站描述】${description}` : '',
-      '【页面正文节选】',
-      bodyText || '（当前页面正文内容为空或无法提取）'
-    ]
-      .filter(Boolean)
-      .join('\n');
-
-    const userPrompt = [
-      '下面是当前网站的内容，请根据 Skill 模板的要求，为该网站生成一份推广文案：',
-      '',
-      websiteContent
-    ].join('\n');
-
-    const apiUrl = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
-
-    const requestBody = {
-      model: 'qwen-plus',
-      messages: [
-        { role: 'system', content: QWEN_SKILL_TEMPLATE },
-        { role: 'user', content: userPrompt }
-      ]
-    };
-
-    const response = await fetch(apiUrl, {
+    const response = await fetch(`${QWEN_API_BASE}/generate-copy`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${DASHSCOPE_API_KEY}`
-      },
-      body: JSON.stringify(requestBody)
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId,
+        websiteUrl,
+        title,
+        description,
+        bodyText,
+        skillTemplate: QWEN_SKILL_TEMPLATE
+      })
     });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('DashScope API 响应异常：', response.status, errorText);
-      throw new Error('通义千问接口调用失败，具体信息请查看控制台。');
-    }
 
     const data = await response.json();
 
-    const aiText =
-      data &&
-      data.choices &&
-      data.choices[0] &&
-      data.choices[0].message &&
-      data.choices[0].message.content
-        ? data.choices[0].message.content
-        : '未能从通义千问响应中解析出文案内容。';
+    if (!response.ok || !data.success) {
+      const msg = data && data.error
+        ? `生成失败: ${data.error}`
+        : '后端返回异常，请稍后重试。';
+      throw new Error(msg);
+    }
+
+    const aiText = data.text || '未能从响应中解析出文案内容。';
 
     console.log('通义千问生成的网站推广文案：\n', aiText);
     return aiText;

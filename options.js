@@ -1,6 +1,5 @@
 // 选项页逻辑：保存和读取 DashScope / 通义千问 API Key & Skill 模板 & 用户ID
 
-const API_KEY_STORAGE_KEY = 'dashscope_api_key';
 const SKILL_TEMPLATE_STORAGE_KEY = 'qwen_skill_template';
 const WEBSITE_URL_STORAGE_KEY = 'promotion_website_url';
 const AUTO_OPEN_QWEN_PANEL_KEY = 'auto_open_qwen_panel';
@@ -14,7 +13,6 @@ const USER_ID_STORAGE_KEY = 'auto_comment_user_id';
 const POINTS_API_BASE = 'https://auto-comment-beta.vercel.app/api';
 
 document.addEventListener('DOMContentLoaded', () => {
-  const apiKeyInput = document.getElementById('apiKey');
   const skillTemplateInput = document.getElementById('skillTemplate');
   const websiteUrlInput = document.getElementById('websiteUrl');
   const autoOpenPanelCheckbox = document.getElementById('autoOpenPanel');
@@ -23,14 +21,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const userEmailInput = document.getElementById('userEmail');
   const userPasswordInput = document.getElementById('userPassword');
   const saveBtn = document.getElementById('saveBtn');
-  const clearBtn = document.getElementById('clearBtn');
   const statusEl = document.getElementById('status');
   const userIdInput = document.getElementById('userId');
   const refreshPointsBtn = document.getElementById('refreshPointsBtn');
   const pointsBalanceEl = document.getElementById('pointsBalance');
 
   if (
-    !apiKeyInput ||
     !skillTemplateInput ||
     !websiteUrlInput ||
     !autoOpenPanelCheckbox ||
@@ -39,7 +35,6 @@ document.addEventListener('DOMContentLoaded', () => {
     !userEmailInput ||
     !userPasswordInput ||
     !saveBtn ||
-    !clearBtn ||
     !statusEl
   ) {
     console.error('Options page 初始化失败：元素未找到');
@@ -60,7 +55,6 @@ document.addEventListener('DOMContentLoaded', () => {
   // 初始化时从 chrome.storage.sync 读取
   chrome.storage.sync.get(
     [
-      API_KEY_STORAGE_KEY,
       SKILL_TEMPLATE_STORAGE_KEY,
       WEBSITE_URL_STORAGE_KEY,
       AUTO_OPEN_QWEN_PANEL_KEY,
@@ -73,9 +67,6 @@ document.addEventListener('DOMContentLoaded', () => {
       if (chrome.runtime.lastError) {
         console.error('读取设置失败：', chrome.runtime.lastError);
         return;
-      }
-      if (result && typeof result[API_KEY_STORAGE_KEY] === 'string') {
-        apiKeyInput.value = result[API_KEY_STORAGE_KEY];
       }
       if (result && typeof result[SKILL_TEMPLATE_STORAGE_KEY] === 'string') {
         skillTemplateInput.value = result[SKILL_TEMPLATE_STORAGE_KEY];
@@ -140,7 +131,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 保存按钮
   saveBtn.addEventListener('click', () => {
-    const key = apiKeyInput.value.trim();
     const skillTemplate = skillTemplateInput.value.trim();
     const websiteUrl = websiteUrlInput.value.trim();
     const autoOpenPanel = !!autoOpenPanelCheckbox.checked;
@@ -152,7 +142,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     chrome.storage.sync.set(
       {
-        [API_KEY_STORAGE_KEY]: key,
         [SKILL_TEMPLATE_STORAGE_KEY]: skillTemplate,
         [WEBSITE_URL_STORAGE_KEY]: websiteUrl,
         [AUTO_OPEN_QWEN_PANEL_KEY]: autoOpenPanel,
@@ -175,19 +164,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       }
     );
-  });
-
-  // 清空按钮
-  clearBtn.addEventListener('click', () => {
-    apiKeyInput.value = '';
-    chrome.storage.sync.remove([API_KEY_STORAGE_KEY], () => {
-      if (chrome.runtime.lastError) {
-        console.error('清空 API Key 失败：', chrome.runtime.lastError);
-        showStatus('清空失败', 2000);
-        return;
-      }
-      showStatus('已清空');
-    });
   });
 
   // ====== 积分查询功能 ======
