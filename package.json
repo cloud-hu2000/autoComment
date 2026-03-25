@@ -2,11 +2,23 @@
   "name": "auto-comment-backend",
   "version": "1.0.0",
   "description": "Auto Comment Filler Backend API",
-  "main": "api/index.js",
+  "main": "server.js",
   "scripts": {
-    "start": "node api/index.js"
+    "start": "node server.js",
+    "dev": "node server.js",
+    "pm2:start": "pm2 start server.js --name auto-comment-api",
+    "pm2:stop": "pm2 stop auto-comment-api",
+    "pm2:restart": "pm2 restart auto-comment-api",
+    "pm2:logs": "pm2 logs auto-comment-api"
   },
   "dependencies": {
-    "@neondatabase/serverless": "^0.9.5"
+    "@neondatabase/serverless": "^0.9.5",
+    "express": "^4.18.2"
+  },
+  "devDependencies": {
+    "pm2": "^5.3.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }

@@ -8,15 +8,6 @@ const POINTS_COST_PER_GENERATION = 1;
  * Body: { userId: string, websiteUrl: string, title: string, description: string, bodyText: string, skillTemplate: string }
  */
 module.exports = async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-  if (req.method === 'OPTIONS') {
-    res.status(200).end();
-    return;
-  }
-
   if (req.method !== 'POST') {
     res.status(405).json({ error: '仅支持 POST 请求' });
     return;

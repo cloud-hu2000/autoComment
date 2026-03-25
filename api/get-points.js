@@ -5,16 +5,11 @@ const { sql } = require('./storage');
  * GET /api/get-points?userId=xxx
  */
 module.exports = async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
   if (req.method === 'OPTIONS') {
     res.status(200).end();
     return;
   }
 
-  // Vercel API Routes 会自动解析 query
   const { userId } = req.query || {};
 
   if (!userId) {
