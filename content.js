@@ -267,7 +267,7 @@
   const USER_ID_STORAGE_KEY = 'auto_comment_user_id';
 
   // ====== 积分系统配置 ======
-  const POINTS_API_BASE = 'http://localhost:3000/api';
+  const POINTS_API_BASE = 'https://auto-comment-beta.vercel.app/api';
   const POINTS_COST_PER_GENERATION = 1;
 
   // ====== 防重复生成配置 ======

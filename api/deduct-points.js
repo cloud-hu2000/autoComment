@@ -5,12 +5,16 @@ const { sql } = require('./storage');
  * POST /api/deduct-points
  * Body: { userId: string, points: number }
  */
-module.exports = async function deductPoints(req, res, body) {
-  const { userId, points } = body;
+module.exports = async (req, res) => {
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: '仅支持 POST 请求' });
+    return;
+  }
 
-  if (!userId || !points) {
-    res.writeHead(400);
-    res.end(JSON.stringify({ error: '缺少必要参数' }));
+  const { userId, points } = req.body || {};
+
+  if (!userId || points === undefined) {
+    res.status(400).json({ error: '缺少必要参数' });
     return;
   }
 
@@ -23,13 +27,12 @@ module.exports = async function deductPoints(req, res, body) {
     const currentPoints = rows.length > 0 ? rows[0].points : 0;
 
     if (currentPoints < points) {
-      res.writeHead(200);
-      res.end(JSON.stringify({
+      res.status(200).json({
         success: false,
         error: '积分不足',
         currentPoints,
         requiredPoints: points
-      }));
+      });
       return;
     }
 
@@ -42,15 +45,13 @@ module.exports = async function deductPoints(req, res, body) {
       DO UPDATE SET points = EXCLUDED.points, updated_at = CURRENT_TIMESTAMP
     `;
 
-    res.writeHead(200);
-    res.end(JSON.stringify({
+    res.status(200).json({
       success: true,
       deductedPoints: points,
       remainingPoints: newPoints
-    }));
+    });
   } catch (err) {
     console.error('[deduct-points] 数据库操作失败:', err.message);
-    res.writeHead(500);
-    res.end(JSON.stringify({ error: '数据库操作失败', message: err.message }));
+    res.status(500).json({ error: '数据库操作失败', message: err.message });
   }
 };
