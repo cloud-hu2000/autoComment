@@ -257,6 +257,7 @@
 
   // ====== 通义千问后端配置 ======
   const QWEN_API_BASE = 'https://auto-comment-beta.vercel.app/api';
+  const SKILL_TEMPLATE_STORAGE_KEY = 'qwen_skill_template';
   const WEBSITE_URL_STORAGE_KEY = 'promotion_website_url';
   const AUTO_OPEN_QWEN_PANEL_KEY = 'auto_open_qwen_panel';
   const AUTO_GENERATE_QWEN_ON_PAGE_LOAD_KEY = 'auto_generate_qwen_on_page_load';
