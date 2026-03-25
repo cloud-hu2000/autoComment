@@ -2,8 +2,6 @@
 const http = require('http');
 const url = require('url');
 
-const createOrder = require('./create-order');
-const checkOrder = require('./check-order');
 const deductPoints = require('./deduct-points');
 const getPoints = require('./get-points');
 
@@ -35,11 +33,7 @@ const server = http.createServer(async (req, res) => {
 
     const query = parsedUrl.query;
 
-    if (pathname === '/api/create-order' && req.method === 'POST') {
-      await createOrder(req, res, JSON.parse(body || '{}'));
-    } else if (pathname === '/api/check-order' && req.method === 'GET') {
-      await checkOrder(req, res, query);
-    } else if (pathname === '/api/deduct-points' && req.method === 'POST') {
+    if (pathname === '/api/deduct-points' && req.method === 'POST') {
       await deductPoints(req, res, JSON.parse(body || '{}'));
     } else if (pathname === '/api/get-points' && req.method === 'GET') {
       await getPoints(req, res, query);

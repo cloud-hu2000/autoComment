@@ -3,7 +3,6 @@
   <head>
     <meta charset="UTF-8" />
     <title>Auto Register Filler 设置</title>
-    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
     <style>
       body {
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu,
@@ -142,6 +141,30 @@
         在这里安全地保存你的 DashScope / 通义千问 API Key，并自定义网站推广 Skill 语言模板。
       </div>
 
+      <!-- 用户ID区域 -->
+      <div style="margin-bottom: 20px; padding: 14px 16px; background: #eff6ff; border-radius: 10px; border: 1px solid #bfdbfe;">
+        <label for="userId">用户 ID（线下分配）</label>
+        <div style="display: flex; gap: 8px; align-items: center; margin-top: 6px;">
+          <input
+            type="text"
+            id="userId"
+            placeholder="请输入管理员分配的用户 ID，例如：user_xxx"
+            style="flex: 1;"
+            autocomplete="off"
+          />
+          <button id="refreshPointsBtn" class="btn btn-secondary" style="white-space: nowrap; flex-shrink: 0;">刷新积分</button>
+        </div>
+        <div class="hint" style="margin-top: 8px;">
+          - 用户 ID 由管理员线下分配，用于关联你的积分账户。<br />
+          - 输入 ID 后，积分余额会自动从服务器查询；生成推广文案时会消耗积分。
+        </div>
+        <div style="margin-top: 10px; display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 12px; color: #374151; font-weight: 600;">积分余额：</span>
+          <span id="pointsBalance" style="font-size: 16px; font-weight: 700; color: #1d4ed8;">—</span>
+          <span style="font-size: 12px; color: #6b7280;">积分</span>
+        </div>
+      </div>
+
       <div>
         <label for="apiKey">DashScope / 通义千问 API Key</label>
         <input type="password" id="apiKey" placeholder="sk-..." autocomplete="off" />
@@ -235,7 +258,7 @@
           style="display: flex; align-items: center; gap: 8px; font-weight: 600"
         >
           <input type="checkbox" id="autoOpenPanel" />
-          页面加载后自动打开“网站推广助手”浮动窗口
+          页面加载后自动打开"网站推广助手"浮动窗口
         </label>
         <div class="hint">
           - 勾选后，每次打开页面都会在右下角自动弹出推广助手窗口，方便连续撰写评论。<br />
@@ -257,60 +280,6 @@
         </div>
       </div>
 
-      <!-- 积分充值区域 -->
-      <div style="margin-top: 24px; padding: 16px; background: linear-gradient(135deg, #fef3c7, #fde68a); border-radius: 12px; border: 1px solid #f59e0b;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-          <label style="margin: 0; color: #92400e;">积分余额</label>
-          <span id="pointsBalance" style="font-size: 18px; font-weight: 700; color: #d97706;">0 积分</span>
-        </div>
-        <div class="hint" style="color: #92400e; margin-bottom: 12px;">
-          - 生成推广文案每次消耗 1 积分<br />
-          - 积分不足时将无法使用AI生成功能<br />
-          - 新用户初始赠送 10 积分
-        </div>
-        <button id="rechargeBtn" class="btn" style="background: #f59e0b; color: white; width: 100%;">
-          充值积分
-        </button>
-      </div>
-
-      <!-- 充值套餐选择 -->
-      <div id="rechargeModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center;">
-        <div style="background: white; border-radius: 12px; padding: 24px; max-width: 400px; width: 90%;">
-          <h3 style="margin: 0 0 16px; font-size: 18px;">选择充值套餐</h3>
-          <div id="rechargeOptions" style="display: flex; flex-direction: column; gap: 12px;">
-            <label style="display: flex; align-items: center; gap: 12px; padding: 12px; border: 2px solid #e5e7eb; border-radius: 8px; cursor: pointer; transition: border-color 0.2s;">
-              <input type="radio" name="rechargePackage" value="200" checked />
-              <span style="flex: 1;">200 积分</span>
-              <span style="color: #6b7280;">¥9.9</span>
-            </label>
-            <label style="display: flex; align-items: center; gap: 12px; padding: 12px; border: 2px solid #e5e7eb; border-radius: 8px; cursor: pointer; transition: border-color 0.2s;">
-              <input type="radio" name="rechargePackage" value="500" />
-              <span style="flex: 1;">500 积分</span>
-              <span style="color: #6b7280;">¥19.9</span>
-            </label>
-            <label style="display: flex; align-items: center; gap: 12px; padding: 12px; border: 2px solid #e5e7eb; border-radius: 8px; cursor: pointer; transition: border-color 0.2s;">
-              <input type="radio" name="rechargePackage" value="2000" />
-              <span style="flex: 1;">2000 积分</span>
-              <span style="color: #6b7280;">¥49.9</span>
-            </label>
-          </div>
-          <div style="display: flex; gap: 12px; margin-top: 20px;">
-            <button id="confirmRechargeBtn" class="btn btn-primary" style="flex: 1;">确认充值</button>
-            <button id="cancelRechargeBtn" class="btn btn-secondary" style="flex: 1;">取消</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- 支付二维码展示 -->
-      <div id="paymentModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center;">
-        <div style="background: white; border-radius: 12px; padding: 24px; max-width: 360px; width: 90%; text-align: center;">
-          <h3 style="margin: 0 0 16px;">请使用支付宝扫码支付</h3>
-          <div id="qrCodeContainer" style="margin: 16px 0;"></div>
-          <p id="paymentStatus" style="color: #6b7280; font-size: 14px;">等待支付...</p>
-          <button id="closePaymentBtn" class="btn btn-secondary" style="margin-top: 12px;">关闭</button>
-        </div>
-      </div>
-
       <div class="row">
         <button id="saveBtn" class="btn btn-primary">保存</button>
         <button id="clearBtn" class="btn btn-secondary">清空 API Key</button>
@@ -325,5 +294,4 @@
 
     <script src="options.js"></script>
   </body>
-  </html>
-
+</html>

@@ -37,7 +37,6 @@
     // 填用户名（尽量匹配"用户名 / 账号 / 昵称 / login / username"等字段）
     const usernameCandidates = allInputs.filter((input) => {
       const type = (input.type || '').toLowerCase();
-      // 排除明显不是用户名的字段
       if (type === 'email' || type === 'password' || type === 'checkbox' || type === 'radio') {
         return false;
       }
@@ -82,7 +81,6 @@
     }
 
     // ====== 针对"评论表单"的增强逻辑：自动填 Name / Email / Website ======
-    // 识别明显是"评论 / 留言 / 回复"等用途的 textarea，从而定位对应的表单
     const commentForms = new Set();
     allTextareas.forEach((ta) => {
       const name = (ta.name || '').toLowerCase();
@@ -114,8 +112,6 @@
       }
     });
 
-    // 兜底：如果通过 textarea 属性没能识别到评论表单，再根据表单内文案来猜测
-    // 兼容类似 Deusto 博客这种"Deja una respuesta / Tu dirección de correo electrónico no será publicada"结构
     if (commentForms.size === 0) {
       const forms = Array.from(document.querySelectorAll('form'));
       forms.forEach((form) => {
@@ -123,7 +119,6 @@
         const className = (form.className || '').toLowerCase();
         const id = (form.id || '').toLowerCase();
 
-        // 关键字匹配
         const keywords = [
           'deja una respuesta',
           'deja un comentario',
@@ -140,7 +135,6 @@
           '回复'
         ];
 
-        // WordPress 站点特殊类名匹配
         const wpClassNames = ['comment-form', 'commentform', 'respond', 'comment-respond'];
 
         if (keywords.some((k) => text.includes(k)) ||
@@ -150,7 +144,6 @@
       });
     }
 
-    // 兜底2：如果仍然没有识别到，尝试通过 CSS 类名和 ID 查找评论区域
     if (commentForms.size === 0) {
       const commentAreas = document.querySelectorAll('#comments, .comments, .comment-section, #respond, .respond, .reply');
       commentAreas.forEach(area => {
@@ -161,12 +154,10 @@
       });
     }
 
-    // 在识别到的"评论表单"中，尝试填充 Name 和 Website
     if (commentForms.size > 0) {
       commentForms.forEach((form) => {
         const formInputs = Array.from(form.querySelectorAll('input'));
 
-        // Name / 昵称 / 联系人 等
         const nameInput = formInputs.find((input) => {
           const type = (input.type || '').toLowerCase();
           if (type === 'email' || type === 'password' || type === 'checkbox' || type === 'radio') {
@@ -190,7 +181,7 @@
             '姓名',
             '名字',
             '称呼',
-            'nombre' // 西班牙语：名字
+            'nombre'
           ];
           return keywords.some((k) => text.includes(k));
         });
@@ -198,7 +189,6 @@
           setValue(nameInput, USERNAME);
         }
 
-        // Email（优先在评论表单内部单独再填一次，避免被其他订阅框"抢占"）
         const emailInputInForm = formInputs.find((input) => {
           const type = (input.type || '').toLowerCase();
           const name = (input.name || '').toLowerCase();
@@ -219,7 +209,6 @@
           setValue(emailInputInForm, EMAIL);
         }
 
-        // Website / URL / Homepage 等
         const websiteInput = formInputs.find((input) => {
           const type = (input.type || '').toLowerCase();
           if (type === 'email' || type === 'password' || type === 'checkbox' || type === 'radio') {
@@ -252,7 +241,6 @@
   }
 
   function setValue(input, value) {
-    // 避免被框架拦截，触发原生 setter + 事件
     const descriptor = Object.getOwnPropertyDescriptor(
       Object.getPrototypeOf(input),
       'value'
@@ -268,7 +256,6 @@
   }
 
   // ====== 通义千问：网站推广 Skill 与调用 ======
-  // API Key / Skill 模板 / 推广网站地址都从 chrome.storage.sync 中读取，不在代码中硬编码
   const API_KEY_STORAGE_KEY = 'dashscope_api_key';
   const SKILL_TEMPLATE_STORAGE_KEY = 'qwen_skill_template';
   const WEBSITE_URL_STORAGE_KEY = 'promotion_website_url';
@@ -277,21 +264,15 @@
   const USER_NAME_STORAGE_KEY = 'auto_fill_user_name';
   const USER_EMAIL_STORAGE_KEY = 'auto_fill_user_email';
   const USER_PASSWORD_STORAGE_KEY = 'auto_fill_user_password';
+  const USER_ID_STORAGE_KEY = 'auto_comment_user_id';
 
   // ====== 积分系统配置 ======
-  const USER_ID_KEY = 'auto_comment_user_id';
-  const POINTS_API_BASE = 'https://your-project.vercel.app/api';
-  const POINTS_COST_PER_GENERATION = 1; // 每次生成消耗1积分
-
-  // ====== 开发者调试模式 ======
-  const DEV_MODE = true; // 开发者模式：开启后积分固定为 1000
-  const DEV_POINTS = 1000;
+  const POINTS_API_BASE = 'http://localhost:3000/api';
+  const POINTS_COST_PER_GENERATION = 1;
 
   // ====== 防重复生成配置 ======
-  // 冷却时间：同一域名在24小时内不重复生成推广文案（单位：毫秒）
   const DOMAIN_COOLDOWN_MS = 24 * 60 * 60 * 1000;
   const GENERATION_RECORD_KEY = 'qwen_generation_records';
-  // 表单提交后短期冷却时间（5分钟），防止页面刷新后重复生成
   const SUBMIT_COOLDOWN_MS = 5 * 60 * 1000;
   const SUBMIT_COOLDOWN_KEY = 'qwen_submit_cooldown';
 
@@ -306,97 +287,39 @@
     }
   }
 
-  // 获取当前页面的域名
   function getCurrentDomain() {
     return extractDomain(window.location.href);
   }
 
   // ====== 积分系统函数 ======
-  // 生成设备指纹作为用户ID（不可篡改）
-  async function getUserId() {
-    // 先检查本地是否已有设备指纹
+
+  // 从 chrome.storage.sync 读取用户ID（由管理员线下分配）
+  function getUserId() {
     return new Promise((resolve) => {
-      chrome.storage.local.get([USER_ID_KEY], (result) => {
-        if (result && result[USER_ID_KEY]) {
-          resolve(result[USER_ID_KEY]);
-        } else {
-          // 生成设备指纹
-          generateDeviceFingerprint().then(fingerprint => {
-            chrome.storage.local.set({ [USER_ID_KEY]: fingerprint });
-            resolve(fingerprint);
-          });
+      if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.sync) {
+        resolve('');
+        return;
+      }
+      chrome.storage.sync.get([USER_ID_STORAGE_KEY], (result) => {
+        if (chrome.runtime && chrome.runtime.lastError) {
+          console.error('读取用户ID失败：', chrome.runtime.lastError);
+          resolve('');
+          return;
         }
+        const userId = result && typeof result[USER_ID_STORAGE_KEY] === 'string'
+          ? result[USER_ID_STORAGE_KEY].trim()
+          : '';
+        resolve(userId);
       });
     });
   }
 
-  // 生成设备指纹
-  async function generateDeviceFingerprint() {
-    const features = [
-      screen.width + 'x' + screen.height + 'x' + screen.colorDepth,
-      Intl.DateTimeFormat().resolvedOptions().timeZone,
-      navigator.language,
-      navigator.platform,
-      navigator.hardwareConcurrency || '',
-      navigator.deviceMemory || '',
-      await getCanvasFingerprint(),
-      getWebGLRenderer()
-    ];
-    const fingerprint = await sha256(features.join('|'));
-    return 'device_' + fingerprint.substr(0, 32);
-  }
-
-  function getCanvasFingerprint() {
-    return new Promise((resolve) => {
-      try {
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        ctx.textBaseline = 'top';
-        ctx.font = '14px Arial';
-        ctx.fillStyle = '#f60';
-        ctx.fillRect(125, 1, 62, 20);
-        ctx.fillStyle = '#069';
-        ctx.fillText('AutoComment', 2, 15);
-        ctx.fillStyle = 'rgba(102, 204, 0, 0.7)';
-        ctx.fillText('AutoComment', 4, 17);
-        const dataURL = canvas.toDataURL();
-        sha256(dataURL).then(hash => resolve(hash.substr(0, 16)));
-      } catch (e) {
-        resolve('fallback');
-      }
-    });
-  }
-
-  function getWebGLRenderer() {
-    try {
-      const canvas = document.createElement('canvas');
-      const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
-      if (!gl) return '';
-      const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
-      if (!debugInfo) return '';
-      const vendor = gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL);
-      const renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
-      return vendor + '|' + renderer;
-    } catch (e) {
-      return '';
-    }
-  }
-
-  async function sha256(message) {
-    const msgBuffer = new TextEncoder().encode(message);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-  }
-
   // 查询积分余额
   async function getPointsBalance() {
-    // 开发者模式：直接返回固定积分
-    if (DEV_MODE) {
-      return DEV_POINTS;
-    }
-
     const userId = await getUserId();
+    if (!userId) {
+      return 0;
+    }
     try {
       const response = await fetch(`${POINTS_API_BASE}/get-points?userId=${encodeURIComponent(userId)}`);
       const data = await response.json();
@@ -409,12 +332,10 @@
 
   // 扣减积分
   async function deductPoints(points) {
-    // 开发者模式：跳过扣减，直接返回成功
-    if (DEV_MODE) {
-      return { success: true, remainingPoints: DEV_POINTS };
-    }
-
     const userId = await getUserId();
+    if (!userId) {
+      return { success: false, error: '用户ID未配置，请在选项页面填写用户ID' };
+    }
     try {
       const response = await fetch(`${POINTS_API_BASE}/deduct-points`, {
         method: 'POST',
@@ -466,7 +387,7 @@
     });
   }
 
-  // 从 chrome.storage.sync 中异步获取 Skill 模板（如果为空则回落到默认模板）
+  // 从 chrome.storage.sync 中异步获取 Skill 模板
   function getQwenSkillTemplate() {
     return new Promise((resolve) => {
       if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.sync) {
@@ -492,7 +413,7 @@
     });
   }
 
-  // 从 chrome.storage.sync 中异步获取推广网站地址（用于自动填充评论表单中的 Website/URL 字段）
+  // 从 chrome.storage.sync 中异步获取推广网站地址
   function getWebsiteUrl() {
     return new Promise((resolve) => {
       if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.sync) {
@@ -514,8 +435,7 @@
     });
   }
 
-  // 从 chrome.storage.sync 中异步获取用户的姓名 / 邮箱 / 密码，用于自动填表
-  // 如果为空或读取失败，则回退到扩展内置的默认姓名 / 邮箱 / 密码
+  // 从 chrome.storage.sync 中异步获取用户的姓名 / 邮箱 / 密码
   function getUserProfile() {
     return new Promise((resolve) => {
       if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.sync) {
@@ -530,28 +450,16 @@
             resolve({ name: DEFAULT_USERNAME, email: DEFAULT_EMAIL, password: DEFAULT_PASSWORD });
             return;
           }
-          let name =
-            result && typeof result[USER_NAME_STORAGE_KEY] === 'string'
-              ? result[USER_NAME_STORAGE_KEY].trim()
-              : '';
-          let email =
-            result && typeof result[USER_EMAIL_STORAGE_KEY] === 'string'
-              ? result[USER_EMAIL_STORAGE_KEY].trim()
-              : '';
-          let password =
-            result && typeof result[USER_PASSWORD_STORAGE_KEY] === 'string'
-              ? result[USER_PASSWORD_STORAGE_KEY].trim()
-              : '';
+          let name = result && typeof result[USER_NAME_STORAGE_KEY] === 'string'
+            ? result[USER_NAME_STORAGE_KEY].trim() : '';
+          let email = result && typeof result[USER_EMAIL_STORAGE_KEY] === 'string'
+            ? result[USER_EMAIL_STORAGE_KEY].trim() : '';
+          let password = result && typeof result[USER_PASSWORD_STORAGE_KEY] === 'string'
+            ? result[USER_PASSWORD_STORAGE_KEY].trim() : '';
 
-          if (!name) {
-            name = DEFAULT_USERNAME;
-          }
-          if (!email) {
-            email = DEFAULT_EMAIL;
-          }
-          if (!password) {
-            password = DEFAULT_PASSWORD;
-          }
+          if (!name) name = DEFAULT_USERNAME;
+          if (!email) email = DEFAULT_EMAIL;
+          if (!password) password = DEFAULT_PASSWORD;
 
           resolve({ name, email, password });
         }
@@ -559,8 +467,7 @@
     });
   }
 
-  // 从 chrome.storage.sync 中异步获取"是否自动打开浮动窗口"的设置
-  // 默认值：true（即未设置或读取失败时，视为开启自动打开）
+  // 从 chrome.storage.sync 中获取"是否自动打开浮动窗口"的设置
   function getAutoOpenQwenPanelSetting() {
     return new Promise((resolve) => {
       if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.sync) {
@@ -569,7 +476,6 @@
       }
       chrome.storage.sync.get([AUTO_OPEN_QWEN_PANEL_KEY], (result) => {
         if (chrome.runtime && chrome.runtime.lastError) {
-          console.error('读取自动打开浮动窗口设置失败：', chrome.runtime.lastError);
           resolve(true);
           return;
         }
@@ -582,8 +488,7 @@
     });
   }
 
-  // 从 chrome.storage 中异步获取"是否在页面加载时自动调用通义千问生成推广文案"的设置
-  // 出于节省 token 的考虑，默认值为 false
+  // 从 chrome.storage 中获取"是否在页面加载时自动调用通义千问"的设置
   function getAutoGenerateQwenOnPageLoadSetting() {
     return new Promise((resolve) => {
       if (typeof chrome === 'undefined' || !chrome.storage) {
@@ -593,7 +498,6 @@
 
       let storageArea = null;
       try {
-        // 优先使用 sync，与 options 页面中保存的存储区域保持一致
         if (chrome.storage.sync && typeof chrome.storage.sync.get === 'function') {
           storageArea = chrome.storage.sync;
         } else if (chrome.storage.session && typeof chrome.storage.session.get === 'function') {
@@ -627,14 +531,12 @@
     });
   }
 
-  // 检查当前域名是否在冷却时间内（避免同一域名重复生成）
+  // 检查当前域名是否在冷却时间内
   function isUrlInCooldown() {
     return new Promise((resolve) => {
       const currentDomain = getCurrentDomain();
-      console.log('[AutoComment] isUrlInCooldown - 当前域名:', currentDomain);
 
       if (typeof chrome === 'undefined' || !chrome.storage) {
-        console.log('[AutoComment] isUrlInCooldown - chrome.storage 不可用，返回 false');
         resolve(false);
         return;
       }
@@ -645,57 +547,42 @@
           storageArea = chrome.storage.local;
         }
       } catch (_e) {
-        console.log('[AutoComment] isUrlInCooldown - 获取 storageArea 失败，返回 false');
         resolve(false);
         return;
       }
 
       if (!storageArea) {
-        console.log('[AutoComment] isUrlInCooldown - storageArea 为空，返回 false');
         resolve(false);
         return;
       }
 
       storageArea.get([GENERATION_RECORD_KEY, SUBMIT_COOLDOWN_KEY], (result) => {
         if (chrome.runtime && chrome.runtime.lastError) {
-          console.log('[AutoComment] isUrlInCooldown - runtime.lastError:', chrome.runtime.lastError);
           resolve(false);
           return;
         }
 
-        console.log('[AutoComment] isUrlInCooldown - 存储中的记录:', JSON.stringify(result));
-
         const records = result && result[GENERATION_RECORD_KEY];
         const submitCooldown = result && result[SUBMIT_COOLDOWN_KEY];
 
-        console.log('[AutoComment] isUrlInCooldown - 域名冷却记录:', records ? JSON.stringify(records) : '无');
-        console.log('[AutoComment] isUrlInCooldown - 表单提交冷却:', submitCooldown ? JSON.stringify(submitCooldown) : '无');
-
-        // 检查表单提交冷却（改为检查域名）
         if (submitCooldown && submitCooldown.domain === currentDomain) {
           const submitTime = submitCooldown.timestamp || 0;
           const timeSinceSubmit = Date.now() - submitTime;
-          console.log('[AutoComment] isUrlInCooldown - 距表单提交过去:', timeSinceSubmit, 'ms (冷却时间:', SUBMIT_COOLDOWN_MS, 'ms)');
           if (timeSinceSubmit < SUBMIT_COOLDOWN_MS) {
-            console.log('[AutoComment] isUrlInCooldown - 表单刚提交，命中冷却，返回 true');
             resolve(true);
             return;
           }
         }
 
-        // 检查域名冷却时间（改为检查域名）
         if (records && records[currentDomain] && records[currentDomain].timestamp) {
           const lastGenTime = records[currentDomain].timestamp;
           const timeSinceGen = Date.now() - lastGenTime;
-          console.log('[AutoComment] isUrlInCooldown - 距上次生成过去:', timeSinceGen, 'ms (冷却时间:', DOMAIN_COOLDOWN_MS, 'ms)');
           if (timeSinceGen < DOMAIN_COOLDOWN_MS) {
-            console.log('[AutoComment] isUrlInCooldown - 域名在冷却时间内，返回 true');
             resolve(true);
             return;
           }
         }
 
-        console.log('[AutoComment] isUrlInCooldown - 未命中冷却，返回 false');
         resolve(false);
       });
     });
@@ -727,14 +614,13 @@
         }
 
         chrome.storage.local.set({ [GENERATION_RECORD_KEY]: records }, () => {
-          console.log('[AutoComment] 已记录域名生成时间:', currentDomain);
           resolve();
         });
       });
     });
   }
 
-  // 记录表单提交事件，设置短期冷却（改为记录域名）
+  // 记录表单提交事件
   function recordFormSubmit() {
     return new Promise((resolve) => {
       const currentDomain = getCurrentDomain();
@@ -750,13 +636,12 @@
           timestamp: Date.now()
         }
       }, () => {
-        console.log('[AutoComment] 已记录表单提交，短期内刷新页面不会自动生成，域名:', currentDomain);
         resolve();
       });
     });
   }
 
-  // 获取缓存的推广文案（如果之前生成过）
+  // 获取缓存的推广文案
   function getCachedPromotionCopy() {
     return new Promise((resolve) => {
       const currentDomain = getCurrentDomain();
@@ -781,7 +666,6 @@
   function setupFormSubmitListener() {
     document.addEventListener('submit', (event) => {
       const form = event.target;
-      // 检查是否是评论/留言相关的表单
       const isCommentForm = form && (
         form.id?.toLowerCase().includes('comment') ||
         form.className?.toLowerCase().includes('comment') ||
@@ -789,7 +673,6 @@
       );
 
       if (isCommentForm) {
-        // 延迟执行，等待表单提交完成后再记录
         setTimeout(() => {
           recordFormSubmit();
         }, 1500);
@@ -797,28 +680,18 @@
     }, { capture: true });
   }
 
-  // 在页面打开时自动调用一次通义千问，生成推广文案并尝试自动填充评论框
+  // 在页面打开时自动调用一次通义千问
   let autoGeneratedOnce = false;
 
   async function autoGeneratePromotionOnPageLoad() {
-    console.log('[AutoComment] === 开始执行 autoGeneratePromotionOnPageLoad ===');
-    console.log('[AutoComment] autoGeneratedOnce 当前值:', autoGeneratedOnce);
-    console.log('[AutoComment] 当前页面URL:', window.location.href);
-
     if (autoGeneratedOnce) {
-      console.log('[AutoComment] 拦截：autoGeneratedOnce 已为 true，跳过生成');
       return;
     }
 
-    // 检查URL是否在冷却时间内
-    console.log('[AutoComment] 开始检查冷却时间...');
     const inCooldown = await isUrlInCooldown();
-    console.log('[AutoComment] 冷却时间检查结果 inCooldown:', inCooldown);
 
     if (inCooldown) {
-      console.log('[AutoComment] 跳过自动生成：当前URL在冷却时间内');
       const cachedCopy = await getCachedPromotionCopy();
-      console.log('[AutoComment] 缓存文案内容:', cachedCopy ? '有缓存' : '无缓存');
       if (cachedCopy) {
         lastGeneratedPromotionCopy = cachedCopy;
         tryFillCommentTextareaWithPromotion(cachedCopy);
@@ -828,16 +701,12 @@
     }
 
     const hasCommentBox = !!findLikelyCommentTextarea({ allowGenericFallback: false });
-    console.log('[AutoComment] 是否识别到评论框:', hasCommentBox);
     if (!hasCommentBox) {
-      console.log('[AutoComment] 未识别到评论框，跳过生成');
       return;
     }
 
     autoGeneratedOnce = true;
-    console.log('[AutoComment] 设置 autoGeneratedOnce = true，开始生成文案');
 
-    // 如果浮动窗口已打开，则同步显示按钮"生成中"的状态
     if (
       qwenPanelEl &&
       typeof qwenPanelEl._qwenSetGenerateLoading === 'function' &&
@@ -854,13 +723,9 @@
       lastGeneratedPromotionCopy = text;
       await recordGenerationTime(text);
 
-      // 自动填充到页面中识别到的"评论"文本框（仅在目标文本框当前为空时填充）
       tryFillCommentTextareaWithPromotion(text);
-
-      // 聚焦到评论框，并在需要时填充文案
       focusCommentTextareaWithPromotion(text);
 
-      // 如果浮动窗口已存在，则同步更新到浮动窗口的文本区域和复制按钮状态
       if (
         qwenPanelEl &&
         qwenPanelEl._qwenTextarea &&
@@ -873,8 +738,6 @@
         }
       }
     } catch (err) {
-      // 自动流程中不打扰用户，只在控制台输出错误日志
-      console.error('自动调用通义千问生成推广文案失败：', err);
       if (
         qwenPanelEl &&
         typeof qwenPanelEl._qwenSetGenerateLoading === 'function' &&
@@ -883,19 +746,14 @@
         qwenPanelEl._qwenSetStatus('自动生成推广文案失败，请稍后重试。', '#f97373');
       }
     } finally {
-      if (
-        qwenPanelEl &&
-        typeof qwenPanelEl._qwenSetGenerateLoading === 'function'
-      ) {
+      if (qwenPanelEl && typeof qwenPanelEl._qwenSetGenerateLoading === 'function') {
         qwenPanelEl._qwenSetGenerateLoading(false);
       }
     }
   }
 
-  // 初次加载（仅在页面打开/刷新时自动填表一次，并根据设置决定是否自动打开浮动窗口）
   function initOnPageReady() {
     fillInputs();
-    // 设置表单提交监听器
     setupFormSubmitListener();
 
     getAutoOpenQwenPanelSetting().then((shouldOpen) => {
@@ -903,28 +761,24 @@
         createOrToggleQwenPanel();
       }
     });
-    // 根据当前页面内容，自动调用通义千问生成一份推广文案，并尝试填充到评论框 & 浮动窗口
-    // 该行为受选项页中的开关控制，且开关默认关闭、随浏览器会话重置为关闭，以避免意外消耗过多 token
+
     getAutoGenerateQwenOnPageLoadSetting().then((shouldAutoGenerate) => {
       if (shouldAutoGenerate) {
         autoGeneratePromotionOnPageLoad();
       }
     });
 
-    // 监听动态加载的评论框（很多网站用 Ajax 加载评论区域）
     observeDynamicElements();
   }
 
-  // 监听 DOM 变化，检测动态加载的评论框
   let hasNotifiedCommentBox = false;
   let hasCheckedInitialCommentBox = false;
+
   function observeDynamicElements() {
-    // 首次检查：延迟 1 秒后检查评论框（等待动态加载）
     setTimeout(() => {
       if (!hasCheckedInitialCommentBox) {
         hasCheckedInitialCommentBox = true;
         const hasCommentBox = !!findLikelyCommentTextarea({ allowGenericFallback: false });
-        console.log('[AutoComment] 延迟检查 - 是否识别到评论框:', hasCommentBox);
         if (hasCommentBox && !hasNotifiedCommentBox) {
           hasNotifiedCommentBox = true;
           getAutoGenerateQwenOnPageLoadSetting().then((shouldAutoGenerate) => {
@@ -937,14 +791,11 @@
     }, 1000);
 
     const observer = new MutationObserver((mutations) => {
-      // 检查是否有新的 textarea 或评论区域出现
       const newTextareas = document.querySelectorAll('textarea');
       if (newTextareas.length > 0 && !hasNotifiedCommentBox) {
         const hasCommentBox = !!findLikelyCommentTextarea({ allowGenericFallback: false });
-        console.log('[AutoComment] MutationObserver 检测到评论框:', hasCommentBox);
         if (hasCommentBox) {
           hasNotifiedCommentBox = true;
-          // 重新尝试自动生成
           getAutoGenerateQwenOnPageLoadSetting().then((shouldAutoGenerate) => {
             if (shouldAutoGenerate && !autoGeneratedOnce) {
               autoGeneratePromotionOnPageLoad();
@@ -966,10 +817,6 @@
     initOnPageReady();
   }
 
-  // 根据页面结构找到一个最有可能是"评论 / 留言"用途的 textarea
-  // allowGenericFallback:
-  //   - false：仅在明确识别为"评论/留言"区域时返回（用于是否触发自动生成的判断，避免浪费 token）
-  //   - true：在识别失败时退回到页面第一个 textarea，保证在部分网站上尽量可用
   function findLikelyCommentTextarea(options) {
     const allowGenericFallback = options && options.allowGenericFallback;
     const allTextareas = Array.from(document.querySelectorAll('textarea'));
@@ -983,7 +830,6 @@
       const id = (ta.id || '').toLowerCase();
       const placeholder = (ta.placeholder || '').toLowerCase();
       const text = `${name} ${id} ${placeholder}`;
-      console.log('[AutoComment] 检测 textarea:', { name, id, placeholder, text });
 
       const keywords = [
         'comment',
@@ -1003,7 +849,6 @@
         '回复'
       ];
       if (keywords.some((k) => text.includes(k))) {
-        console.log('[AutoComment] 匹配到评论 textarea:', ta);
         commentTextareas.push(ta);
         const form = ta.form || (ta.closest && ta.closest('form'));
         if (form) {
@@ -1012,7 +857,6 @@
       }
     });
 
-    // 兜底：如果通过 textarea 属性没能识别到评论表单，再根据表单内文案来猜测
     if (commentForms.size === 0) {
       const forms = Array.from(document.querySelectorAll('form'));
       forms.forEach((form) => {
@@ -1033,11 +877,9 @@
 
     let targetTextarea = null;
 
-    // 优先使用之前通过关键词识别到的 textarea
     if (commentTextareas.length > 0) {
       targetTextarea = commentTextareas[0];
     } else if (commentForms.size > 0) {
-      // 其次在识别到的评论表单内挑一个 textarea
       for (const form of commentForms) {
         const formTextareas = Array.from(form.querySelectorAll('textarea'));
         if (formTextareas.length > 0) {
@@ -1047,7 +889,6 @@
       }
     }
 
-    // 再兜底：如果仍未识别到评论表单，就用页面中的第一个 textarea（避免完全失效）
     if (!targetTextarea && allowGenericFallback) {
       targetTextarea = allTextareas[0];
     }
@@ -1055,14 +896,12 @@
     return targetTextarea || null;
   }
 
-  // 尝试根据页面结构找到一个最有可能是"评论 / 留言"用途的 textarea，并在为空时填充推广文案
   function tryFillCommentTextareaWithPromotion(promotionText) {
     if (!promotionText) return;
 
     const targetTextarea = findLikelyCommentTextarea({ allowGenericFallback: true });
     if (!targetTextarea) return;
 
-    // 仅在当前为空时填充，避免覆盖用户已经在编辑的内容
     if ((targetTextarea.value || '').trim()) {
       return;
     }
@@ -1070,9 +909,6 @@
     setValue(targetTextarea, promotionText);
   }
 
-  // 在生成推广文案后，将光标自动移动到最有可能的评论框：
-  // - 如果评论框当前为空，则自动填入推广文案
-  // - 无论是否填充，都将焦点与光标移动到评论框末尾，并滚动到视口中
   function focusCommentTextareaWithPromotion(promotionText) {
     const targetTextarea = findLikelyCommentTextarea({ allowGenericFallback: true });
     if (!targetTextarea) return;
@@ -1092,12 +928,11 @@
         targetTextarea.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }
     } catch (e) {
-      // 忽略焦点/滚动异常，避免影响主流程
-      console.warn('尝试将焦点移动到评论框时出错：', e);
+      // 忽略异常
     }
   }
 
-  // 收集当前页面内容 + 调用通义千问生成推广文案（仅负责返回文本，不做 UI 交互）
+  // 收集当前页面内容 + 调用通义千问生成推广文案
   async function generatePromotionCopyWithQwen() {
     const DASHSCOPE_API_KEY = await getDashScopeApiKey();
     const QWEN_SKILL_TEMPLATE = await getQwenSkillTemplate();
@@ -1108,23 +943,26 @@
       );
     }
 
-    // 检查积分是否充足（开发者模式跳过检查）
-    if (!DEV_MODE) {
-      const currentPoints = await getPointsBalance();
-      if (currentPoints < POINTS_COST_PER_GENERATION) {
-        throw new Error(
-          `积分不足！当前积分: ${currentPoints}，生成一次需要 ${POINTS_COST_PER_GENERATION} 积分。请到扩展选项页面充值。`
-        );
-      }
+    // 检查用户ID是否配置
+    const userId = await getUserId();
+    if (!userId) {
+      throw new Error(
+        '尚未配置用户 ID，请在扩展选项页面填写由管理员分配的用户 ID。'
+      );
+    }
 
-      // 扣减积分
-      const deductResult = await deductPoints(POINTS_COST_PER_GENERATION);
-      if (!deductResult.success) {
-        throw new Error(`扣减积分失败: ${deductResult.error || '未知错误'}`);
-      }
-      console.log(`[积分] 扣减 ${POINTS_COST_PER_GENERATION} 积分，剩余 ${deductResult.remainingPoints} 积分`);
-    } else {
-      console.log(`[积分] 开发者模式：跳过积分检查和扣减`);
+    // 检查积分是否充足
+    const currentPoints = await getPointsBalance();
+    if (currentPoints < POINTS_COST_PER_GENERATION) {
+      throw new Error(
+        `积分不足！当前积分: ${currentPoints}，生成一次需要 ${POINTS_COST_PER_GENERATION} 积分。请联系管理员充值。`
+      );
+    }
+
+    // 扣减积分
+    const deductResult = await deductPoints(POINTS_COST_PER_GENERATION);
+    if (!deductResult.success) {
+      throw new Error(`扣减积分失败: ${deductResult.error || '未知错误'}`);
     }
 
     const websiteUrl = window.location.href || '';
@@ -1137,7 +975,6 @@
     let bodyText = '';
     if (document.body) {
       bodyText = document.body.innerText || '';
-      // 简单清洗、截断，避免内容过长
       bodyText = bodyText.replace(/\s+/g, ' ').trim();
       const MAX_LEN = 4000;
       if (bodyText.length > MAX_LEN) {
@@ -1161,7 +998,6 @@
       websiteContent
     ].join('\n');
 
-    // 调用 DashScope / 通义千问（OpenAI 兼容模式）
     const apiUrl = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
 
     const requestBody = {
@@ -1202,8 +1038,7 @@
     return aiText;
   }
 
-  // ====== 页面内浮动窗口 UI：AI 生成推广文案 + 一键复制 ======
-
+  // ====== 页面内浮动窗口 UI ======
   let qwenPanelEl = null;
 
   function createOrToggleQwenPanel() {
@@ -1252,16 +1087,10 @@
     closeBtn.style.fontSize = '16px';
     closeBtn.style.lineHeight = '1';
     closeBtn.style.padding = '2px 4px';
-    closeBtn.addEventListener('mouseenter', () => {
-      closeBtn.style.color = '#e5e7eb';
-    });
-    closeBtn.addEventListener('mouseleave', () => {
-      closeBtn.style.color = '#9ca3af';
-    });
+    closeBtn.addEventListener('mouseenter', () => { closeBtn.style.color = '#e5e7eb'; });
+    closeBtn.addEventListener('mouseleave', () => { closeBtn.style.color = '#9ca3af'; });
     closeBtn.addEventListener('click', () => {
-      if (panel.parentNode) {
-        panel.parentNode.removeChild(panel);
-      }
+      if (panel.parentNode) panel.parentNode.removeChild(panel);
       qwenPanelEl = null;
     });
 
@@ -1293,17 +1122,13 @@
     generateBtn.style.fontSize = '12px';
     generateBtn.style.fontWeight = '500';
     generateBtn.style.cursor = 'pointer';
-    generateBtn.style.background =
-      'linear-gradient(135deg, #2563eb, #4f46e5)';
+    generateBtn.style.background = 'linear-gradient(135deg, #2563eb, #4f46e5)';
     generateBtn.style.color = '#f9fafb';
     generateBtn.style.boxShadow = '0 10px 24px rgba(37,99,235,0.45)';
     generateBtn.addEventListener('mouseenter', () => {
-      if (generateBtn.disabled) return;
-      generateBtn.style.filter = 'brightness(1.05)';
+      if (!generateBtn.disabled) generateBtn.style.filter = 'brightness(1.05)';
     });
-    generateBtn.addEventListener('mouseleave', () => {
-      generateBtn.style.filter = 'none';
-    });
+    generateBtn.addEventListener('mouseleave', () => { generateBtn.style.filter = 'none'; });
 
     const copyBtn = document.createElement('button');
     copyBtn.textContent = '复制文案';
@@ -1353,13 +1178,11 @@
     document.documentElement.appendChild(panel);
     qwenPanelEl = panel;
 
-    // 暴露内部控件与方法，方便外部（例如自动生成流程）同步文案与状态
     qwenPanelEl._qwenTextarea = textarea;
     qwenPanelEl._qwenSetStatus = setStatus;
     qwenPanelEl._qwenSetCopyEnabled = setCopyEnabled;
     qwenPanelEl._qwenSetGenerateLoading = setGenerateLoading;
 
-    // 如果在页面加载阶段已经自动生成过推广文案，则在首次打开浮动窗口时直接回显
     if (lastGeneratedPromotionCopy) {
       textarea.value = lastGeneratedPromotionCopy;
       setCopyEnabled(true);
@@ -1368,9 +1191,7 @@
 
     function setStatus(text, color) {
       statusEl.textContent = text || '';
-      if (color) {
-        statusEl.style.color = color;
-      }
+      if (color) statusEl.style.color = color;
     }
 
     function setCopyEnabled(enabled) {
@@ -1390,8 +1211,7 @@
         generateBtn.disabled = false;
         generateBtn.style.opacity = '1';
         generateBtn.style.cursor = 'pointer';
-        generateBtn.style.background =
-          'linear-gradient(135deg, #2563eb, #4f46e5)';
+        generateBtn.style.background = 'linear-gradient(135deg, #2563eb, #4f46e5)';
         generateBtn.style.boxShadow = '0 10px 24px rgba(37,99,235,0.45)';
         generateBtn.textContent = 'AI生成推广文案';
       }
@@ -1409,13 +1229,9 @@
         await recordGenerationTime(text);
         setStatus('生成完成，可以复制使用。', '#22c55e');
         setCopyEnabled(true);
-        // 生成文案后，自动将焦点移动到页面中的评论框，并在需要时填充文案
         focusCommentTextareaWithPromotion(text);
       } catch (err) {
-        console.error('调用通义千问生成推广文案失败：', err);
-        const msg =
-          (err && err.message) ||
-          '调用通义千问失败，请检查控制台日志或 API Key 配置。';
+        const msg = (err && err.message) || '调用通义千问失败，请检查控制台日志或 API Key 配置。';
         setStatus(msg, '#f97373');
         setCopyEnabled(false);
       } finally {
@@ -1442,14 +1258,12 @@
         }
         setStatus('文案已复制到剪贴板。', '#22c55e');
       } catch (err) {
-        console.error('复制文案失败：', err);
         setStatus('复制失败，请手动选择文本复制。', '#f97373');
       }
     });
 
     // ====== 外链分析功能 ======
     function analyzeOutlinks() {
-      const currentHost = window.location.hostname;
       const links = Array.from(document.querySelectorAll('a[href]'));
 
       const outlinks = links
@@ -1457,28 +1271,24 @@
           const href = link.href;
           try {
             const url = new URL(href);
-            // 排除锚点链接、邮件、电话等
             if (url.protocol === 'mailto:' ||
                 url.protocol === 'tel:' ||
                 url.protocol === 'javascript:' ||
                 href.startsWith('#')) {
               return null;
             }
-            // 排除站内链接
-            if (url.hostname === currentHost || url.hostname.endsWith('.' + currentHost)) {
+            if (isSameSite(url.hostname)) {
               return null;
             }
-            // 检测 nofollow
             const rel = (link.rel || '').toLowerCase();
             const isNofollow = rel.includes('nofollow');
-            const isDofollow = rel.includes('dofollow') || !isNofollow;
 
             return {
               url: href,
               text: link.textContent?.trim() || link.innerText?.trim() || '',
               host: url.hostname,
               isNofollow,
-              isDofollow
+              isDofollow: !isNofollow
             };
           } catch (e) {
             return null;
@@ -1486,19 +1296,15 @@
         })
         .filter(Boolean);
 
-      // 去重
       const seen = new Set();
-      const uniqueOutlinks = outlinks.filter(link => {
+      return outlinks.filter(link => {
         if (seen.has(link.url)) return false;
         seen.add(link.url);
         return true;
       });
-
-      return uniqueOutlinks;
     }
 
     function showOutlinksPanel() {
-      // 移除已存在的面板
       const existing = document.getElementById('auto-comment-outlinks-panel');
       if (existing) existing.remove();
 
@@ -1525,7 +1331,6 @@
       panel.style.flexDirection = 'column';
       panel.style.overflow = 'hidden';
 
-      // Header
       const header = document.createElement('div');
       header.style.display = 'flex';
       header.style.alignItems = 'center';
@@ -1550,7 +1355,6 @@
       header.appendChild(title);
       header.appendChild(closeBtn);
 
-      // Stats
       const stats = document.createElement('div');
       stats.style.display = 'flex';
       stats.style.gap = '16px';
@@ -1566,7 +1370,6 @@
       stats.appendChild(dofollowStat);
       stats.appendChild(nofollowStat);
 
-      // List
       const list = document.createElement('div');
       list.style.flex = '1';
       list.style.overflowY = 'auto';
@@ -1607,6 +1410,7 @@
           linkEl.textContent = link.host;
           linkEl.style.color = '#60a5fa';
           linkEl.style.textDecoration = 'none';
+          linkEl.style.fontFamily = 'monospace';
           linkEl.target = '_blank';
 
           item.appendChild(tag);
@@ -1615,7 +1419,6 @@
         });
       }
 
-      // Export button
       const exportBtn = document.createElement('button');
       exportBtn.textContent = '导出 CSV';
       exportBtn.style.margin = '12px 16px';
@@ -1654,7 +1457,101 @@
       document.body.appendChild(panel);
     }
 
-    // 外链分析按钮
+    // ====== 外链高亮 ======
+    const OUTLINK_HIGHLIGHT_CLASS = 'auto-comment-outlink-highlight';
+    let outlinkHighlightEnabled = false;
+
+    function normalizeHost(hostname) {
+      return hostname.replace(/^www\./, '').toLowerCase();
+    }
+
+    function isSameSite(hostname) {
+      const normalizedCurrent = normalizeHost(window.location.hostname);
+      const normalizedLink = normalizeHost(hostname);
+      if (normalizedCurrent === normalizedLink) return true;
+      if (normalizedLink.endsWith('.' + normalizedCurrent)) return true;
+      if (normalizedCurrent.endsWith('.' + normalizedLink)) return true;
+      return false;
+    }
+
+    function highlightExternalLinks() {
+      const links = Array.from(document.querySelectorAll('a[href]'));
+      links.forEach(link => {
+        const href = link.href;
+        try {
+          const url = new URL(href);
+          if (url.protocol === 'mailto:' ||
+              url.protocol === 'tel:' ||
+              url.protocol === 'javascript:' ||
+              href.startsWith('#')) {
+            return;
+          }
+          if (isSameSite(url.hostname)) {
+            return;
+          }
+          link.classList.add(OUTLINK_HIGHLIGHT_CLASS);
+        } catch (e) {}
+      });
+    }
+
+    function removeOutlinkHighlights() {
+      const highlighted = document.querySelectorAll('.' + OUTLINK_HIGHLIGHT_CLASS);
+      highlighted.forEach(link => {
+        link.classList.remove(OUTLINK_HIGHLIGHT_CLASS);
+      });
+    }
+
+    function toggleOutlinkHighlight() {
+      outlinkHighlightEnabled = !outlinkHighlightEnabled;
+      if (outlinkHighlightEnabled) {
+        highlightExternalLinks();
+      } else {
+        removeOutlinkHighlights();
+      }
+      return outlinkHighlightEnabled;
+    }
+
+    function injectOutlinkHighlightStyle() {
+      if (document.getElementById('auto-comment-outlink-style')) return;
+      const style = document.createElement('style');
+      style.id = 'auto-comment-outlink-style';
+      style.textContent = [
+        'a.' + OUTLINK_HIGHLIGHT_CLASS + ' {',
+        '  background-color: #fef08a !important;',
+        '  outline: 2px solid #eab308 !important;',
+        '  border-radius: 2px;',
+        '  transition: background-color 0.2s, outline 0.2s;',
+        '}',
+        'a.' + OUTLINK_HIGHLIGHT_CLASS + ':hover {',
+        '  background-color: #fde047 !important;',
+        '  outline-color: #ca8a04 !important;',
+        '}'
+      ].join('\n');
+      document.head.appendChild(style);
+    }
+
+    injectOutlinkHighlightStyle();
+
+    const highlightBtn = document.createElement('button');
+    highlightBtn.textContent = outlinkHighlightEnabled ? '取消高亮' : '高亮外链';
+    highlightBtn.style.border = 'none';
+    highlightBtn.style.borderRadius = '999px';
+    highlightBtn.style.padding = '7px 10px';
+    highlightBtn.style.fontSize = '12px';
+    highlightBtn.style.cursor = 'pointer';
+    highlightBtn.style.background = outlinkHighlightEnabled
+      ? 'linear-gradient(135deg, #2563eb, #4f46e5)'
+      : 'rgba(15,23,42,0.8)';
+    highlightBtn.style.color = '#e5e7eb';
+    highlightBtn.style.border = '1px solid rgba(148,163,184,0.6)';
+    highlightBtn.addEventListener('click', () => {
+      const enabled = toggleOutlinkHighlight();
+      highlightBtn.textContent = enabled ? '取消高亮' : '高亮外链';
+      highlightBtn.style.background = enabled
+        ? 'linear-gradient(135deg, #2563eb, #4f46e5)'
+        : 'rgba(15,23,42,0.8)';
+    });
+
     const outlinkBtn = document.createElement('button');
     outlinkBtn.textContent = '分析外链';
     outlinkBtn.style.border = 'none';
@@ -1668,16 +1565,20 @@
     outlinkBtn.addEventListener('click', showOutlinksPanel);
 
     btnRow.appendChild(generateBtn);
+    btnRow.appendChild(highlightBtn);
     btnRow.appendChild(outlinkBtn);
     btnRow.appendChild(copyBtn);
-
   }
 
-  // 监听 background.js 中点击扩展图标发送的消息，打开/关闭浮动窗口
+  // 监听 background.js 中点击扩展图标发送的消息
   if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
     chrome.runtime.onMessage.addListener((message, _sender, _sendResponse) => {
       if (message && message.type === 'TOGGLE_PROMOTE_WITH_QWEN_PANEL') {
         createOrToggleQwenPanel();
+      }
+      if (message && message.type === 'TOGGLE_OUTLINK_HIGHLIGHT') {
+        const enabled = toggleOutlinkHighlight();
+        if (_sendResponse) _sendResponse({ enabled });
       }
     });
   }

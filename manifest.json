@@ -5,7 +5,6 @@
   "description": "自动填充注册表单，并使用通义千问为当前网站生成推广文案。",
   "permissions": [
     "activeTab",
-    "scripting",
     "storage"
   ],
   "host_permissions": [
