@@ -256,7 +256,7 @@
   }
 
   // ====== 通义千问后端配置 ======
-  const QWEN_API_BASE = 'http://101.37.116.48/api';
+  const QWEN_API_BASE = 'https://101.37.116.48/api';
   const SKILL_TEMPLATE_STORAGE_KEY = 'qwen_skill_template';
   const WEBSITE_URL_STORAGE_KEY = 'promotion_website_url';
   const AUTO_OPEN_QWEN_PANEL_KEY = 'auto_open_qwen_panel';
@@ -267,7 +267,7 @@
   const USER_ID_STORAGE_KEY = 'auto_comment_user_id';
 
   // ====== 积分系统配置 ======
-  const POINTS_API_BASE = 'http://101.37.116.48/api';
+  const POINTS_API_BASE = 'https://101.37.116.48/api';
   const POINTS_COST_PER_GENERATION = 1;
 
   // ====== 防重复生成配置 ======
