@@ -23,7 +23,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const saveBtn = document.getElementById('saveBtn');
   const statusEl = document.getElementById('status');
   const userIdInput = document.getElementById('userId');
-  const refreshPointsBtn = document.getElementById('refreshPointsBtn');
   const pointsBalanceEl = document.getElementById('pointsBalance');
 
   if (
@@ -190,19 +189,6 @@ document.addEventListener('DOMContentLoaded', () => {
       console.error('查询积分失败:', error);
       setPointsBalance('网络错误');
     }
-  }
-
-  // 刷新积分按钮
-  if (refreshPointsBtn) {
-    refreshPointsBtn.addEventListener('click', () => {
-      const userId = userIdInput.value.trim();
-      if (!userId) {
-        setPointsBalance(null);
-        return;
-      }
-      setPointsBalance('查询中…');
-      fetchPointsBalance(userId);
-    });
   }
 
   // 页面加载时自动查询积分（如果有用户ID）

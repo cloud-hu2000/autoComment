@@ -152,11 +152,12 @@
             style="flex: 1;"
             autocomplete="off"
           />
-          <button id="refreshPointsBtn" class="btn btn-secondary" style="white-space: nowrap; flex-shrink: 0;">刷新积分</button>
+          <button id="saveBtn" class="btn btn-primary">保存并刷新积分</button>
+          <span id="status" class="status">已保存</span>
         </div>
         <div class="hint" style="margin-top: 8px;">
           - 用户 ID 由管理员线下分配，用于关联你的积分账户。<br />
-          - 输入 ID 后，积分余额会自动从服务器查询；生成推广文案时会消耗积分。
+          - 点击"保存并刷新积分"后，积分余额会自动从服务器查询并更新。
         </div>
         <div style="margin-top: 10px; display: flex; align-items: center; gap: 10px;">
           <span style="font-size: 12px; color: #374151; font-weight: 600;">积分余额：</span>
