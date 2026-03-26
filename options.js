@@ -10,7 +10,7 @@ const AUTO_GENERATE_QWEN_ON_PAGE_LOAD_KEY = 'auto_generate_qwen_on_page_load';
 const USER_ID_STORAGE_KEY = 'auto_comment_user_id';
 
 // ====== 积分系统配置 ======
-const POINTS_API_BASE = 'https://101.37.116.48/api';
+const POINTS_API_BASE = 'https://jieyunsang.cn/api';
 
 document.addEventListener('DOMContentLoaded', () => {
   const skillTemplateInput = document.getElementById('skillTemplate');
