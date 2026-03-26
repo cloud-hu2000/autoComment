@@ -1,4 +1,4 @@
-const { sql } = require('./storage');
+const { queryOne, exec } = require('./storage');
 
 /**
  * 扣减用户积分
@@ -25,11 +25,8 @@ module.exports = async (req, res) => {
 
   try {
     // 查询当前积分
-    const rows = await sql`
-      SELECT points FROM auto_comment_users WHERE user_id = ${userId}
-    `;
-
-    const currentPoints = rows.length > 0 ? rows[0].points : 0;
+    const row = queryOne`SELECT points FROM auto_comment_users WHERE user_id = ${userId}`;
+    const currentPoints = row ? row.points : 0;
 
     if (currentPoints < points) {
       res.status(200).json({
@@ -43,12 +40,12 @@ module.exports = async (req, res) => {
 
     // 扣减积分
     const newPoints = currentPoints - points;
-    await sql`
-      INSERT INTO auto_comment_users (user_id, points, updated_at)
-      VALUES (${userId}, ${newPoints}, CURRENT_TIMESTAMP)
-      ON CONFLICT (user_id)
-      DO UPDATE SET points = EXCLUDED.points, updated_at = CURRENT_TIMESTAMP
-    `;
+
+    if (row) {
+      exec`UPDATE auto_comment_users SET points = ${newPoints}, updated_at = datetime('now') WHERE user_id = ${userId}`;
+    } else {
+      exec`INSERT INTO auto_comment_users (user_id, points, updated_at) VALUES (${userId}, ${newPoints}, datetime('now'))`;
+    }
 
     res.status(200).json({
       success: true,

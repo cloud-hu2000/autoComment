@@ -1,11 +1,11 @@
-const { sql } = require('./storage');
+const { queryOne, exec } = require('./storage');
 
 const POINTS_COST_PER_GENERATION = 1;
 
 /**
  * 生成推广文案
  * POST /api/generate-copy
- * Body: { userId: string, websiteUrl: string, title: string, description: string, bodyText: string, skillTemplate: string }
+ * Body: { userId, websiteUrl, title, description, bodyText, skillTemplate }
  */
 module.exports = async (req, res) => {
   if (req.method !== 'POST') {
@@ -21,12 +21,9 @@ module.exports = async (req, res) => {
   }
 
   try {
-    // 1. 查询并扣减积分
-    const rows = await sql`
-      SELECT points FROM auto_comment_users WHERE user_id = ${userId}
-    `;
-
-    const currentPoints = rows.length > 0 ? rows[0].points : 0;
+    // 1. 查询当前积分
+    const row = queryOne`SELECT points FROM auto_comment_users WHERE user_id = ${userId}`;
+    const currentPoints = row ? row.points : 0;
 
     if (currentPoints < POINTS_COST_PER_GENERATION) {
       res.status(200).json({
@@ -39,14 +36,15 @@ module.exports = async (req, res) => {
     }
 
     const newPoints = currentPoints - POINTS_COST_PER_GENERATION;
-    await sql`
-      INSERT INTO auto_comment_users (user_id, points, updated_at)
-      VALUES (${userId}, ${newPoints}, CURRENT_TIMESTAMP)
-      ON CONFLICT (user_id)
-      DO UPDATE SET points = EXCLUDED.points, updated_at = CURRENT_TIMESTAMP
-    `;
 
-    // 2. 构造发送给通义千问的内容
+    // 2. 扣减积分（UPSERT）
+    if (row) {
+      exec`UPDATE auto_comment_users SET points = ${newPoints}, updated_at = datetime('now') WHERE user_id = ${userId}`;
+    } else {
+      exec`INSERT INTO auto_comment_users (user_id, points, updated_at) VALUES (${userId}, ${newPoints}, datetime('now'))`;
+    }
+
+    // 3. 构造发送给通义千问的内容
     const DEFAULT_SKILL_TEMPLATE = [
       '你是一个资深的网站营销与文案专家，擅长为各类网站撰写高转化率的推广文案。',
       '请严格根据我提供的"当前网站内容"进行分析和创作，不要凭空捏造网站不存在的功能或信息。',
@@ -76,7 +74,7 @@ module.exports = async (req, res) => {
       websiteContent
     ].join('\n');
 
-    // 3. 调用通义千问
+    // 4. 调用通义千问
     const apiKey = process.env.DASHSCOPE_API_KEY;
     if (!apiKey) {
       console.error('[generate-copy] DASHSCOPE_API_KEY 环境变量未配置');

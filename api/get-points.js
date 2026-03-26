@@ -1,4 +1,4 @@
-const { sql } = require('./storage');
+const { queryOne } = require('./storage');
 
 /**
  * 查询用户积分
@@ -18,10 +18,8 @@ module.exports = async (req, res) => {
   }
 
   try {
-    const rows = await sql`
-      SELECT points FROM auto_comment_users WHERE user_id = ${userId}
-    `;
-    const points = rows.length > 0 ? rows[0].points : 0;
+    const row = queryOne`SELECT points FROM auto_comment_users WHERE user_id = ${userId}`;
+    const points = row ? row.points : 0;
     res.status(200).json({ success: true, points });
   } catch (err) {
     console.error('[get-points] 数据库查询失败:', err.message);

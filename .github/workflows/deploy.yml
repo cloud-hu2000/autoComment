@@ -1,0 +1,47 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy to Alibaba Cloud
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.ALIYUN_HOST }}
+          username: ${{ secrets.ALIYUN_USER }}
+          password: ${{ secrets.ALIYUN_PASSWORD }}
+          port: ${{ secrets.ALIYUN_SSH_PORT || '22' }}
+          script: |
+            # 进入项目目录
+            cd ${{ secrets.ALIYUN_DEPLOY_PATH }}
+
+            # 拉取最新代码
+            git pull origin master
+
+            # 安装依赖
+            npm ci
+
+            # 重启 PM2
+            pm2 restart auto-comment-api || pm2 start server.js --name auto-comment-api
+            pm2 save
+
+            # 查看状态
+            pm2 list
