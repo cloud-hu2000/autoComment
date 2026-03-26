@@ -1,3 +1,6 @@
+const express = require('express');
+const router = express.Router();
+
 const { queryOne, exec } = require('./storage');
 
 const POINTS_COST_PER_GENERATION = 1;
@@ -7,11 +10,7 @@ const POINTS_COST_PER_GENERATION = 1;
  * POST /api/generate-copy
  * Body: { userId, websiteUrl, title, description, bodyText, skillTemplate }
  */
-module.exports = async (req, res) => {
-  if (req.method !== 'POST') {
-    res.status(405).json({ error: '仅支持 POST 请求' });
-    return;
-  }
+router.post('/generate-copy', async (req, res) => {
 
   const { userId, websiteUrl, title, description, bodyText, skillTemplate } = req.body || {};
 
@@ -126,4 +125,6 @@ module.exports = async (req, res) => {
     console.error('[generate-copy] 错误：', err.message);
     res.status(500).json({ error: '服务器内部错误', message: err.message });
   }
-};
+});
+
+module.exports = router;

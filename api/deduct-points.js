@@ -1,3 +1,6 @@
+const express = require('express');
+const router = express.Router();
+
 const { queryOne, exec } = require('./storage');
 
 /**
@@ -5,17 +8,7 @@ const { queryOne, exec } = require('./storage');
  * POST /api/deduct-points
  * Body: { userId: string, points: number }
  */
-module.exports = async (req, res) => {
-  if (req.method === 'OPTIONS') {
-    res.status(200).end();
-    return;
-  }
-
-  if (req.method !== 'POST') {
-    res.status(405).json({ error: '仅支持 POST 请求' });
-    return;
-  }
-
+router.post('/deduct-points', (req, res) => {
   const { userId, points } = req.body || {};
 
   if (!userId || points === undefined) {
@@ -56,4 +49,6 @@ module.exports = async (req, res) => {
     console.error('[deduct-points] 数据库操作失败:', err.message);
     res.status(500).json({ error: '数据库操作失败', message: err.message });
   }
-};
+});
+
+module.exports = router;
