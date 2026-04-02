@@ -138,7 +138,7 @@
     <div class="container">
       <h1>Auto Register Filler 设置</h1>
       <div class="subtitle">
-        在这里配置通义千问生成文案所使用的 Skill 语言模板，以及其他个性化设置。
+        在这里配置 AI 文案生成所使用的语言模板，以及其他个性化设置。
       </div>
 
       <!-- 用户ID区域 -->
@@ -152,8 +152,8 @@
             style="flex: 1;"
             autocomplete="off"
           />
-          <button id="saveBtn" class="btn btn-primary">保存并刷新积分</button>
-          <span id="status" class="status">已保存</span>
+          <button id="savePointsBtn" class="btn btn-primary">保存并刷新积分</button>
+          <span id="pointsStatus" class="status">已保存</span>
         </div>
         <div class="hint" style="margin-top: 8px;">
           - 用户 ID 由管理员线下分配，用于关联你的积分账户。<br />
@@ -167,7 +167,7 @@
       </div>
 
       <div>
-        <label for="skillTemplate">通义千问 Skill 语言模板（system 提示词）</label>
+        <label for="skillTemplate">AI 语言模板（system 提示词）</label>
         <textarea
           id="skillTemplate"
           rows="10"
@@ -182,10 +182,6 @@
             resize: vertical;
           "
         ></textarea>
-        <div class="hint">
-          - 支持多行文本，将作为调用通义千问时的 <strong>system</strong> 提示词。<br />
-          - 为空时会使用内置默认模板；修改后立即生效。
-        </div>
       </div>
 
       <div style="margin-top: 20px">
@@ -203,7 +199,6 @@
           />
           <div class="hint">
             - 在评论表单中自动填充到 Website / URL / 网址 字段。<br />
-            - 为空时不会自动填 Website 字段。
           </div>
         </div>
 
@@ -237,7 +232,6 @@
           </div>
           <div class="hint">
             - 用于自动填写注册表单和评论表单中的 Name / Email / Password / 姓名 / 邮箱 / 密码 字段。<br />
-            - 姓名和邮箱留空时会使用扩展内置的默认值；密码留空时会使用扩展内置的默认密码。
           </div>
         </div>
       </div>
@@ -252,7 +246,6 @@
         </label>
         <div class="hint">
           - 勾选后，每次打开页面都会在右下角自动弹出推广助手窗口，方便连续撰写评论。<br />
-          - 取消勾选则仅在点击扩展图标时才会打开浮动窗口。
         </div>
       </div>
 
@@ -262,22 +255,26 @@
           style="display: flex; align-items: center; gap: 8px; font-weight: 600"
         >
           <input type="checkbox" id="autoGenerateOnLoad" />
-          允许在页面加载时自动调用通义千问生成推广文案
+          允许在页面加载时自动调用 AI 生成推广文案
         </label>
         <div class="hint">
-          - 该开关默认关闭，并且每次重新打开浏览器时都会自动恢复为关闭状态。<br />
-          - 仅在勾选后，扩展才会在检测到评论框时自动调用通义千问生成推广文案，以避免在不知情的情况下持续消耗 token。
+          - 勾选后，在检测到评论框后，自动调用 AI 生成推广文案。
+        </div>
+      </div>
+
+      <!-- 联系方式 -->
+      <div style="margin-top: 24px; padding: 14px 16px; background: #f0fdf4; border-radius: 10px; border: 1px solid #bbf7d0;">
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+          <span style="font-size: 13px; font-weight: 700; color: #15803d;">联系我们</span>
+        </div>
+        <div style="font-size: 13px; color: #374151; line-height: 1.6;">
+          如有问题或建议，欢迎联系微信：<strong style="color: #15803d;">cloudhu2000</strong>
         </div>
       </div>
 
       <div class="row">
-        <button id="saveBtn" class="btn btn-primary">保存</button>
-        <span id="status" class="status">已保存</span>
-      </div>
-
-      <div class="footer">
-        如果频繁调用接口，请注意控制频率和用量，避免不必要的费用。
-        <span class="danger">请勿在公共电脑上保存你的 API Key。</span>
+        <button id="saveSettingsBtn" class="btn btn-primary">保存</button>
+        <span id="settingsStatus" class="status">已保存</span>
       </div>
     </div>
 

@@ -1,4 +1,4 @@
-// 选项页逻辑：保存和读取 DashScope / 通义千问 API Key & Skill 模板 & 用户ID
+// 选项页逻辑：保存和读取 AI API Key、Skill 模板和用户ID
 
 const SKILL_TEMPLATE_STORAGE_KEY = 'qwen_skill_template';
 const WEBSITE_URL_STORAGE_KEY = 'promotion_website_url';
@@ -20,8 +20,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const userNameInput = document.getElementById('userName');
   const userEmailInput = document.getElementById('userEmail');
   const userPasswordInput = document.getElementById('userPassword');
-  const saveBtn = document.getElementById('saveBtn');
-  const statusEl = document.getElementById('status');
+  const saveSettingsBtn = document.getElementById('saveSettingsBtn');
+  const settingsStatusEl = document.getElementById('settingsStatus');
+  const savePointsBtn = document.getElementById('savePointsBtn');
+  const pointsStatusEl = document.getElementById('pointsStatus');
   const userIdInput = document.getElementById('userId');
   const pointsBalanceEl = document.getElementById('pointsBalance');
 
@@ -33,8 +35,8 @@ document.addEventListener('DOMContentLoaded', () => {
     !userNameInput ||
     !userEmailInput ||
     !userPasswordInput ||
-    !saveBtn ||
-    !statusEl
+    !saveSettingsBtn ||
+    !settingsStatusEl
   ) {
     console.error('Options page 初始化失败：元素未找到');
     return;
@@ -46,9 +48,10 @@ document.addEventListener('DOMContentLoaded', () => {
     '请严格根据我提供的"当前网站内容"进行分析和创作，不要凭空捏造网站不存在的功能或信息。',
     '',
     '【输出要求】',
-    '1. 我需要在该网站发表评论，关联到我的网站，并吸引用户点击访问我的网站。',
+    '1. 我需要在该网站发表评论，关联到我的网站【请在此处输入网站链接】，并吸引用户点击访问我的网站。',
     '2. 语气可以专业但要自然、真实，避免夸张、虚假宣传。',
-    '3. 使用网站的主要语言作为输出语言 100-200词。'
+    '3. 使用网站的主要语言作为输出语言，字数建议控制在 100词。',
+    '4. 只要评论的语句，不要输出其他无关的句子。'
   ].join('\n');
 
   // 初始化时从 chrome.storage.sync 读取
@@ -96,7 +99,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   );
 
-  // 设置：是否在页面加载时自动调用通义千问生成推广文案
+  // 设置：是否在页面加载时自动调用 AI 生成推广文案
   (function initSessionAutoGenerateSetting() {
     if (!chrome.storage || !chrome.storage.sync) {
       if (autoGenerateOnLoadCheckbox) {
@@ -118,18 +121,18 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   })();
 
-  function showStatus(text, timeout = 1600) {
-    statusEl.textContent = text;
-    statusEl.classList.add('visible');
+  function showStatus(el, text, timeout = 1600) {
+    el.textContent = text;
+    el.classList.add('visible');
     if (timeout > 0) {
       setTimeout(() => {
-        statusEl.classList.remove('visible');
+        el.classList.remove('visible');
       }, timeout);
     }
   }
 
-  // 保存按钮
-  saveBtn.addEventListener('click', () => {
+  // 保存 AI 语言模板、自动填表信息及按钮选项
+  saveSettingsBtn.addEventListener('click', () => {
     const skillTemplate = skillTemplateInput.value.trim();
     const websiteUrl = websiteUrlInput.value.trim();
     const autoOpenPanel = !!autoOpenPanelCheckbox.checked;
@@ -137,7 +140,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const userName = userNameInput.value.trim();
     const userEmail = userEmailInput.value.trim();
     const userPassword = userPasswordInput.value.trim();
-    const userId = userIdInput.value.trim();
 
     chrome.storage.sync.set(
       {
@@ -147,22 +149,33 @@ document.addEventListener('DOMContentLoaded', () => {
         [USER_NAME_STORAGE_KEY]: userName,
         [USER_EMAIL_STORAGE_KEY]: userEmail,
         [USER_PASSWORD_STORAGE_KEY]: userPassword,
-        [AUTO_GENERATE_QWEN_ON_PAGE_LOAD_KEY]: autoGenerateOnLoad,
-        [USER_ID_STORAGE_KEY]: userId
+        [AUTO_GENERATE_QWEN_ON_PAGE_LOAD_KEY]: autoGenerateOnLoad
       },
       () => {
         if (chrome.runtime.lastError) {
           console.error('保存设置失败：', chrome.runtime.lastError);
-          showStatus('保存失败', 2000);
+          showStatus(settingsStatusEl, '保存失败', 2000);
           return;
         }
-        showStatus('已保存');
-        // 保存后自动刷新积分
-        if (userId) {
-          fetchPointsBalance(userId);
-        }
+        showStatus(settingsStatusEl, '已保存');
       }
     );
+  });
+
+  // 保存并刷新积分（仅保存用户ID + 查询积分）
+  savePointsBtn.addEventListener('click', () => {
+    const userId = userIdInput.value.trim();
+    chrome.storage.sync.set({ [USER_ID_STORAGE_KEY]: userId }, () => {
+      if (chrome.runtime.lastError) {
+        console.error('保存用户ID失败：', chrome.runtime.lastError);
+        showStatus(pointsStatusEl, '保存失败', 2000);
+        return;
+      }
+      showStatus(pointsStatusEl, '已保存');
+      if (userId) {
+        fetchPointsBalance(userId);
+      }
+    });
   });
 
   // ====== 积分查询功能 ======
