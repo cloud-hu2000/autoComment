@@ -275,12 +275,14 @@
   //  适用于 WordPress 中使用 React/Vue 或字符级监听的主题
   // ──────────────────────────────────────────────────────────────
   function setValueRobust(input, value) {
+    console.log('进入setValueRobust方法');
     try {
       input.focus();
       input.select && input.select();
     } catch (_) {}
 
     // 模拟逐字输入（最高兼容性）
+    console.log('开始模拟逐字输入');
     for (const ch of value) {
       if (input.value && input.value.length > 0) {
         // 用 setValue 方法清空已有内容
@@ -303,6 +305,7 @@
     }
 
     // 再触发一次完整赋值 + 事件
+    console.log('再触发一次完整赋值 + 事件');
     const desc3 = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value');
     if (desc3 && desc3.set) {
       desc3.set.call(input, value);
@@ -579,7 +582,10 @@
   // 从 chrome.storage 中获取"是否自动提交评论"的设置
   function getAutoSubmitCommentSetting() {
     return new Promise((resolve) => {
+      console.log('[AutoComment] getAutoSubmitCommentSetting 开始检查...');
+
       if (typeof chrome === 'undefined' || !chrome.storage) {
+        console.log('[AutoComment] chrome 或 chrome.storage 未定义，返回 false');
         resolve(false);
         return;
       }
@@ -588,32 +594,45 @@
       try {
         if (chrome.storage.sync && typeof chrome.storage.sync.get === 'function') {
           storageArea = chrome.storage.sync;
+          console.log('[AutoComment] 使用 storage.sync');
         } else if (chrome.storage.session && typeof chrome.storage.session.get === 'function') {
           storageArea = chrome.storage.session;
+          console.log('[AutoComment] storage.sync 不可用，使用 storage.session');
+        } else {
+          console.log('[AutoComment] storage.sync 和 storage.session 都不可用');
         }
       } catch (_e) {
+        console.log('[AutoComment] 尝试获取 storageArea 时出错:', _e, '，返回 false');
         resolve(false);
         return;
       }
 
       if (!storageArea) {
+        console.log('[AutoComment] storageArea 为 null，返回 false');
         resolve(false);
         return;
       }
 
       try {
         storageArea.get([AUTO_SUBMIT_COMMENT_KEY], (result) => {
+          console.log('[AutoComment] storage.get 回调，result:', JSON.stringify(result));
+          console.log('[AutoComment] chrome.runtime.lastError:', chrome.runtime && chrome.runtime.lastError);
           if (chrome.runtime && chrome.runtime.lastError) {
+            console.log('[AutoComment] chrome.runtime.lastError 存在，返回 false');
             resolve(false);
             return;
           }
           if (!result || typeof result[AUTO_SUBMIT_COMMENT_KEY] === 'undefined') {
+            console.log('[AutoComment] result 为空或 key 不存在，返回 false');
             resolve(false);
             return;
           }
-          resolve(Boolean(result[AUTO_SUBMIT_COMMENT_KEY]));
+          const val = Boolean(result[AUTO_SUBMIT_COMMENT_KEY]);
+          console.log('[AutoComment] 开关值:', val, '，返回:', val);
+          resolve(val);
         });
       } catch (_e) {
+        console.log('[AutoComment] storageArea.get 抛出异常:', _e, '，返回 false');
         resolve(false);
       }
     });
@@ -782,6 +801,7 @@
       const cachedCopy = await getCachedPromotionCopy();
       if (cachedCopy) {
         lastGeneratedPromotionCopy = cachedCopy;
+        console.log('autoGeneratePromotionOnPageLoad方法调用tryFillCommentTextareaWithPromotion');
         tryFillCommentTextareaWithPromotion(cachedCopy);
         focusCommentTextareaWithPromotion(cachedCopy);
       }
@@ -810,22 +830,95 @@
 
       lastGeneratedPromotionCopy = text;
       await recordGenerationTime(text);
-
+      console.log('generatePromotionCopyWithQwen方法调用tryFillCommentTextareaWithPromotion');
       tryFillCommentTextareaWithPromotion(text);
       focusCommentTextareaWithPromotion(text);
 
-      if (
-        qwenPanelEl &&
-        qwenPanelEl._qwenTextarea &&
-        typeof qwenPanelEl._qwenSetCopyEnabled === 'function'
-      ) {
-        qwenPanelEl._qwenTextarea.value = text;
-        qwenPanelEl._qwenSetCopyEnabled(true);
+      // ── 检查用户配置是否完整 ─────────────────────────────────
+      const userProfile = await getUserProfile();
+      console.log('[AutoComment-AutoLoad] getUserProfile 完成:', JSON.stringify(userProfile));
+      if (!userProfile.name || !userProfile.email) {
+        const missing = [];
+        if (!userProfile.name) missing.push('姓名（Name）');
+        if (!userProfile.email) missing.push('邮箱（Email）');
+        const msg = '请先在扩展选项页填写' + missing.join('和') + '，否则无法自动提交评论！';
+        if (typeof qwenPanelEl._qwenSetStatus === 'function') {
+          qwenPanelEl._qwenSetStatus(msg, '#f97373');
+        }
+        console.error('[AutoComment-AutoLoad] ' + msg);
+        return;
+      }
+
+      // ── 检查是否开启自动提交 ─────────────────────────────────
+      const shouldAutoSubmit = await getAutoSubmitCommentSetting();
+      console.log('[AutoComment-AutoLoad] shouldAutoSubmit =', shouldAutoSubmit);
+
+      if (shouldAutoSubmit) {
+        console.log('[AutoComment-AutoLoad] 准备自动提交评论...');
+        if (typeof qwenPanelEl._qwenSetStatus === 'function') {
+          qwenPanelEl._qwenSetStatus('正在自动提交评论，请稍候…', '#9ca3af');
+        }
+
+        // 确保所有表单字段都已填好，再点击提交按钮
+        const fillResult = await ensureAllCommentFormFieldsFilled(text);
+
+        if (!fillResult.success) {
+          const msg = '以下字段缺失，无法自动提交：' + fillResult.missingFields.join('、');
+          if (typeof qwenPanelEl._qwenSetStatus === 'function') {
+            qwenPanelEl._qwenSetStatus(msg + '，请手动检查', '#f97373');
+          }
+          console.error('[AutoComment-AutoLoad] 自动提交跳过 - 字段缺失:', fillResult.missingFields);
+          return;
+        }
+
+        const submitButton = findCommentSubmitButton();
+        if (!submitButton) {
+          if (typeof qwenPanelEl._qwenSetStatus === 'function') {
+            qwenPanelEl._qwenSetStatus('未找到提交按钮，请手动提交', '#f59e0b');
+          }
+          return;
+        }
+
+        if (!isButtonClickable(submitButton)) {
+          if (typeof qwenPanelEl._qwenSetStatus === 'function') {
+            qwenPanelEl._qwenSetStatus('提交按钮不可见，请手动检查', '#f59e0b');
+          }
+          return;
+        }
+
+        // 等待一小段时间确保页面 JS 验证逻辑已完成初始化
+        await new Promise(resolve => setTimeout(resolve, 600));
+
+        const result = await clickCommentSubmitButton();
+        if (result.success) {
+          if (typeof qwenPanelEl._qwenSetStatus === 'function') {
+            qwenPanelEl._qwenSetStatus('评论已自动提交！', '#22c55e');
+          }
+        } else {
+          if (typeof qwenPanelEl._qwenSetStatus === 'function') {
+            qwenPanelEl._qwenSetStatus('自动提交失败：' + (result.error || '未知错误') + '，请手动提交', '#f97373');
+          }
+        }
+      } else {
+        // 未开启自动提交，仅填充文案并高亮提交按钮
+        console.log('[AutoComment-AutoLoad] 未开启自动提交，仅填充文案...');
         if (typeof qwenPanelEl._qwenSetStatus === 'function') {
           qwenPanelEl._qwenSetStatus('已自动生成推广文案，可以复制使用。', '#22c55e');
         }
+
+        const submitButton = findCommentSubmitButton();
+        if (submitButton) {
+          submitButton.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          submitButton.style.outline = '3px solid #22c55e';
+          submitButton.style.outlineOffset = '2px';
+          setTimeout(() => {
+            submitButton.style.outline = '';
+            submitButton.style.outlineOffset = '';
+          }, 3000);
+        }
       }
     } catch (err) {
+      console.error('[AutoComment-AutoLoad] 生成推广文案失败:', err);
       if (
         qwenPanelEl &&
         typeof qwenPanelEl._qwenSetGenerateLoading === 'function' &&
@@ -1100,18 +1193,43 @@
   }
 
   // ====== 通用评论提交按钮检测函数 ======
-  function findCommentSubmitButton() {
+  /**
+   * 输入: 无（依赖 DOM）
+   * 输出: { form, button } 与当前评论框同一表单的提交控件，避免与页面上其它表单的 submit 混淆
+   */
+  function resolveCommentFormAndSubmitButton() {
+    const ta = findLikelyCommentTextarea({ allowGenericFallback: true });
+    if (ta) {
+      const form = ta.form || (ta.closest && ta.closest('form'));
+      if (form) {
+        const btn = findSubmitButtonInForm(form);
+        if (btn) return { form, button: btn };
+      }
+    }
     const commentForm = findCommentForm();
     if (commentForm) {
-      return findSubmitButtonInForm(commentForm);
+      const btn = findSubmitButtonInForm(commentForm);
+      if (btn) return { form: commentForm, button: btn };
     }
-    return findStandaloneSubmitButton();
+    const standalone = findStandaloneSubmitButton();
+    if (standalone) {
+      const form =
+        standalone.form ||
+        (standalone.closest && standalone.closest('form')) ||
+        null;
+      return { form, button: standalone };
+    }
+    return { form: null, button: null };
+  }
+
+  function findCommentSubmitButton() {
+    return resolveCommentFormAndSubmitButton().button;
   }
 
   // 查找评论表单
   function findCommentForm() {
-    // 方法1: 通过 textarea 关联的表单
-    const commentTextarea = findLikelyCommentTextarea({ allowGenericFallback: false });
+    // 方法1: 通过 textarea 关联的表单（与填充逻辑一致，允许 generic 回退）
+    const commentTextarea = findLikelyCommentTextarea({ allowGenericFallback: true });
     if (commentTextarea) {
       const form = commentTextarea.form || (commentTextarea.closest && commentTextarea.closest('form'));
       if (form) return form;
@@ -1201,9 +1319,9 @@
       }
     }
 
-    // 方法2: 查找所有可能的提交元素
+    // 方法2: 查找所有可能的提交元素（表单内无 type 的 button 默认为 submit）
     const candidates = form.querySelectorAll(
-      'button[type="submit"], input[type="submit"], input[type="image"], [role="submit"]'
+      'button[type="submit"], button:not([type]), input[type="submit"], input[type="image"], [role="submit"]'
     );
 
     if (candidates.length > 0) {
@@ -1299,8 +1417,7 @@
       '.wpcf7-submit',
       '#wpcf7-submit',
       '.form-submit',
-      '#form-submit',
-      'input[type="submit"]'
+      '#form-submit'
     ];
 
     for (const selector of commonSelectors) {
@@ -1412,9 +1529,9 @@
     const isPartiallyVisible = !(rect.bottom < 0 || rect.top > viewportHeight || rect.right < 0 || rect.left > viewportWidth);
 
     if (!isPartiallyVisible) {
-      console.log('[AutoComment] 按钮不在视口内，尝试滚动');
+      console.log('[AutoComment] 按钮不在视口内，尝试立即滚动（避免 smooth 未完成导致坐标错误）');
       try {
-        button.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        button.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'nearest' });
         return true;
       } catch (e) {
         console.log('[AutoComment] 滚动失败:', e.message);
@@ -1442,172 +1559,15 @@
       text: b.textContent ? b.textContent.trim().substring(0, 50) : ''
     })));
 
-    // ── 找提交按钮（4种方法，与 ensureAllCommentFormFieldsFilled 表单查找逻辑对齐） ──
-
-    // 方法1：用与 ensureAllCommentFormFieldsFilled 相同的4步找表单，再找其内的提交按钮
-    function findForm() {
-      // WordPress 标准选择器
-      const formSelectors = [
-        '#commentform', '.comment-form', '.commentform',
-        'form[name="commentform"]', 'form[id="commentform"]',
-        'form[class*="comment-form"]', 'form[id*="comment-form"]'
-      ];
-      for (const sel of formSelectors) {
-        try {
-          const el = document.querySelector(sel);
-          if (el && el.tagName === 'FORM') return el;
-        } catch (_) {}
-      }
-      // textarea.form / closest('form')
-      const textarea = findLikelyCommentTextarea({ allowGenericFallback: true });
-      if (textarea) {
-        if (textarea.form) return textarea.form;
-        if (textarea.closest) {
-          const f = textarea.closest('form');
-          if (f) return f;
-        }
-      }
-      // 评论区域找表单
-      const areaSelectors = ['#comments', '#respond', '.comment-respond', '.comment-section', '.comments-area'];
-      for (const sel of areaSelectors) {
-        const area = document.querySelector(sel);
-        if (area) {
-          const f = area.querySelector('form') || (area.closest ? area.closest('form') : null);
-          if (f) return f;
-        }
-      }
-      // 关键词找表单
-      for (const f of Array.from(document.querySelectorAll('form'))) {
-        const text = (f.textContent || '').toLowerCase();
-        const cls = (f.className || '').toLowerCase();
-        const fid = (f.id || '').toLowerCase();
-        if (text.includes('comment') || text.includes('respond') ||
-            cls.includes('comment') || cls.includes('respond') ||
-            fid.includes('comment') || fid.includes('respond')) {
-          return f;
-        }
-      }
-      return null;
-    }
-
-    function findSubmitInForm(form) {
-      if (!form) return null;
-
-      // WordPress 标准提交按钮选择器
-      const wpSelectors = [
-        '#submit', '#submit-btn', 'input#submit',
-        '.submit', 'input.submit', 'button.submit',
-        'input[type="submit"]#submit',
-        '[name="submit"]', 'input[name="submit"]',
-        'button[name="submit"]', 'input[type="submit"][name="submit"]'
-      ];
-      for (const sel of wpSelectors) {
-        try {
-          const btn = form.querySelector(sel);
-          if (btn) {
-            console.log('[AutoComment] WordPress选择器找到按钮:', sel, btn);
-            return btn;
-          }
-        } catch (_) {}
-      }
-
-      // 所有提交类元素
-      const candidates = form.querySelectorAll(
-        'button[type="submit"], input[type="submit"], input[type="image"], [role="submit"]'
-      );
-      for (const btn of candidates) {
-        const v = (btn.value || '').toLowerCase();
-        const cls = (btn.className || '').toLowerCase();
-        const id = (btn.id || '').toLowerCase();
-        const txt = (btn.textContent || '').toLowerCase();
-        const kw = ['submit', 'post', 'comment', 'publish', 'responder', 'enviar', 'comentar', 'replicar'];
-        if (kw.some(k => v.includes(k) || cls.includes(k) || id.includes(k) || txt.includes(k))) {
-          console.log('[AutoComment] 表单内关键词找到按钮:', { value: v, cls, id, txt });
-          return btn;
-        }
-      }
-
-      if (candidates.length > 0) {
-        console.log('[AutoComment] 返回表单内第1个提交按钮');
-        return candidates[0];
-      }
-
-      // 通过文本找 button
-      for (const btn of form.querySelectorAll('button')) {
-        const txt = (btn.textContent || '').toLowerCase().trim();
-        if (['submit', 'post', 'comment', 'publish', 'responder', 'comentar'].some(k => txt.includes(k))) {
-          return btn;
-        }
-      }
-
-      // 表单只有1个按钮则返回它
-      const allBtns = form.querySelectorAll('button, input[type="button"]');
-      if (allBtns.length === 1) return allBtns[0];
-
-      // 表单第一个 submit input
-      for (const input of form.querySelectorAll('input')) {
-        if ((input.type || '').toLowerCase() === 'submit') return input;
-      }
-      return null;
-    }
-
-    const form = findForm();
-    console.log('[AutoComment] 找到表单:', form ? { id: form.id, className: form.className } : 'null');
-
-    // 优先在表单内找按钮
-    let button = form ? findSubmitInForm(form) : null;
-
-    // 方法2：WordPress 全局选择器
-    if (!button) {
-      const globalSelectors = [
-        '#submit', '#submit-btn', 'input#submit',
-        '.submit', '.comment-submit', '.post-comment',
-        'input[type="submit"]#submit', 'input.submit',
-        'input[type="submit"][name="submit"]'
-      ];
-      for (const sel of globalSelectors) {
-        try {
-          const btn = document.querySelector(sel);
-          if (btn) {
-            console.log('[AutoComment] 全局选择器找到按钮:', sel);
-            button = btn;
-            break;
-          }
-        } catch (_) {}
-      }
-    }
-
-    // 方法3：在评论区域找
-    if (!button) {
-      const areaSelectors = ['#respond', '.comment-respond', '#comments', '.comment-section', '.comment-area'];
-      for (const sel of areaSelectors) {
-        const area = document.querySelector(sel);
-        if (area) {
-          const btn = area.querySelector('button[type="submit"], input[type="submit"], [name="submit"]');
-          if (btn) {
-            console.log('[AutoComment] 在评论区域', sel, '找到按钮');
-            button = btn;
-            break;
-          }
-        }
-      }
-    }
-
-    // 方法4：全局关键词搜索
-    if (!button) {
-      const submitKw = ['submit', 'post', 'comment', 'publish', 'responder', 'comentar'];
-      const allBtns = document.querySelectorAll('button, input[type="submit"]');
-      for (const btn of allBtns) {
-        const txt = ((btn.textContent || btn.value) || '').toLowerCase();
-        const cls = (btn.className || '').toLowerCase();
-        const id = (btn.id || '').toLowerCase();
-        if (submitKw.some(k => txt.includes(k) || cls.includes(k) || id.includes(k))) {
-          console.log('[AutoComment] 全局关键词找到按钮:', { txt, cls, id });
-          button = btn;
-          break;
-        }
-      }
-    }
+    const resolved = resolveCommentFormAndSubmitButton();
+    const form = resolved.form;
+    const button = resolved.button;
+    console.log('[AutoComment] resolveCommentFormAndSubmitButton:', {
+      formId: form ? form.id : null,
+      formClass: form ? form.className : null,
+      buttonTag: button ? button.tagName : null,
+      buttonId: button ? button.id : null
+    });
 
     if (!button) {
       console.log('[AutoComment] 未找到任何提交按钮');
@@ -1641,20 +1601,48 @@
       return { success: false, error: '提交按钮不可见或被禁用' };
     }
 
+    function tryRequestSubmit(formEl, submitter) {
+      if (!formEl) return false;
+      if (typeof formEl.requestSubmit === 'function') {
+        try {
+          formEl.requestSubmit(submitter);
+          return true;
+        } catch (err) {
+          console.log('[AutoComment] requestSubmit 失败:', err.message);
+        }
+      }
+      return false;
+    }
+
     try {
-      // 滚动到按钮位置
-      button.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // 长页面若用 smooth，滚动未完成时 getBoundingClientRect 会算错坐标，合成点击落空
+      button.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'nearest' });
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      await new Promise(resolve => setTimeout(resolve, 80));
 
       console.log('[AutoComment] 尝试点击提交按钮...');
 
-      // 模拟真实鼠标操作（带 clientX/clientY），绕过 Akismet 等反垃圾插件的 pointerdown 检测
       const rect = button.getBoundingClientRect();
       const clientX = Math.round(rect.left + rect.width / 2);
       const clientY = Math.round(rect.top + rect.height / 2);
 
+      const pointerOpts = {
+        bubbles: true,
+        cancelable: true,
+        clientX,
+        clientY,
+        pointerId: 1,
+        pointerType: 'mouse',
+        isPrimary: true,
+        view: window
+      };
+
       try {
-        // mousedown（Akismet 等反垃圾插件在此监听，event.clientX/Y 必需）
+        if (typeof PointerEvent !== 'undefined') {
+          button.dispatchEvent(new PointerEvent('pointerdown', pointerOpts));
+          await new Promise(resolve => setTimeout(resolve, 20));
+        }
+
         button.dispatchEvent(new MouseEvent('mousedown', {
           view: window,
           bubbles: true,
@@ -1664,7 +1652,6 @@
         }));
         await new Promise(resolve => setTimeout(resolve, 40));
 
-        // mouseup
         button.dispatchEvent(new MouseEvent('mouseup', {
           view: window,
           bubbles: true,
@@ -1672,9 +1659,13 @@
           clientX,
           clientY
         }));
-        await new Promise(resolve => setTimeout(resolve, 40));
+        await new Promise(resolve => setTimeout(resolve, 20));
 
-        // click（部分站点在此监听）
+        if (typeof PointerEvent !== 'undefined') {
+          button.dispatchEvent(new PointerEvent('pointerup', pointerOpts));
+          await new Promise(resolve => setTimeout(resolve, 20));
+        }
+
         button.dispatchEvent(new MouseEvent('click', {
           view: window,
           bubbles: true,
@@ -1683,15 +1674,13 @@
           clientY
         }));
 
-        // 记录提交事件
         recordFormSubmit();
 
-        console.log('[AutoComment] 提交按钮点击成功 (mousedown→mouseup→click)');
+        console.log('[AutoComment] 提交按钮点击成功 (pointer/mousedown→mouseup→click)');
         return { success: true, button: button };
       } catch (e) {
-        console.log('[AutoComment] mousedown 方式失败，尝试 button.click():', e.message);
+        console.log('[AutoComment] 合成事件失败，尝试 button.click():', e.message);
         try {
-          // 降级：直接 .click()
           button.click();
           recordFormSubmit();
           console.log('[AutoComment] button.click() 点击成功');
@@ -1699,12 +1688,16 @@
         } catch (e2) {
           console.log('[AutoComment] button.click() 也失败:', e2.message);
 
-          // 最后降级：直接提交表单
+          const formEl = button.form || button.closest('form');
+          if (tryRequestSubmit(formEl, button)) {
+            recordFormSubmit();
+            console.log('[AutoComment] form.requestSubmit(submitter) 成功');
+            return { success: true, button: button };
+          }
           try {
-            const form = button.closest('form');
-            if (form) {
-              console.log('[AutoComment] 尝试直接提交表单');
-              form.submit();
+            if (formEl) {
+              console.log('[AutoComment] 降级 form.submit()（无 submit 事件）');
+              formEl.submit();
               recordFormSubmit();
               return { success: true, button: button };
             }
@@ -1719,7 +1712,6 @@
       console.log('[AutoComment] 直接点击失败:', e.message);
 
       try {
-        // 方法2: 使用 dispatchEvent（无 clientX/Y）
         const event = new MouseEvent('click', {
           view: window,
           bubbles: true,
@@ -1732,12 +1724,16 @@
       } catch (e2) {
         console.log('[AutoComment] dispatchEvent 点击也失败:', e2.message);
 
-        // 方法3: 使用 focus + submit 表单
+        const formEl = button.form || button.closest('form');
+        if (tryRequestSubmit(formEl, button)) {
+          recordFormSubmit();
+          console.log('[AutoComment] form.requestSubmit(submitter) 成功');
+          return { success: true, button: button };
+        }
         try {
-          const form = button.closest('form');
-          if (form) {
-            console.log('[AutoComment] 尝试直接提交表单');
-            form.submit();
+          if (formEl) {
+            console.log('[AutoComment] 尝试 form.submit()');
+            formEl.submit();
             recordFormSubmit();
             return { success: true, button: button };
           }
@@ -1776,7 +1772,7 @@
       return false;
     }
 
-    setValue(targetTextarea, promotionText);
+    setValueRobust(targetTextarea, promotionText);
     console.log('[AutoComment] 成功填入推广文案，长度:', promotionText.length);
     return true;
   }
@@ -2333,52 +2329,87 @@
         textarea.value = text;
         await recordGenerationTime(text);
 
-        // 填入评论文本框
+        // ── 把文案填入页面评论框 ────────────────────────────────────
+        console.log('[AutoComment] >>>[0] 即将调用 tryFillCommentTextareaWithPromotion');
         const filled = tryFillCommentTextareaWithPromotion(text);
-        if (filled) {
-          setStatus('生成完成！文案已填入评论框，点击「自动提交评论」发送', '#22c55e');
-        } else {
-          setStatus('生成完成！文案已填入评论框，请手动检查', '#f59e0b');
+        console.log('[AutoComment] >>>[1] tryFillCommentTextareaWithPromotion 返回:', filled);
+        if (!filled) {
+          console.log('[AutoComment] 页面评论框填充未成功（可能已有内容或未找到文本框）');
         }
+
+        // ── 步骤A：读取用户配置 ─────────────────────────────────
+        console.log('[AutoComment] >>>[2] 即将调用 getUserProfile...');
+        const userProfile = await getUserProfile();
+        console.log('[AutoComment] >>>[3] getUserProfile() 完成:', JSON.stringify(userProfile));
+
+        console.log('[AutoComment] >>>[4] 检查用户配置是否完整...');
+        if (!userProfile.name || !userProfile.email) {
+          const missing = [];
+          if (!userProfile.name) missing.push('姓名（Name）');
+          if (!userProfile.email) missing.push('邮箱（Email）');
+          const msg = '请先在扩展选项页填写' + missing.join('和') + '，否则无法自动提交评论！';
+          setStatus(msg, '#f97373');
+          console.error('[AutoComment] ' + msg);
+          setCopyEnabled(true);
+          setGenerateLoading(false);
+          return;
+        }
+        console.log('[AutoComment] >>>[5] 用户配置检查通过，继续执行...');
 
         setCopyEnabled(true);
 
-        // === 自动提交逻辑 ===
+        // === 自动提交评论（全自动，无需手动点击任何按钮）===
+        console.log('[AutoComment] >>>[6] 即将调用 getAutoSubmitCommentSetting...');
         const shouldAutoSubmit = await getAutoSubmitCommentSetting();
+        console.log('[AutoComment] shouldAutoSubmit =', shouldAutoSubmit);
+
+        console.log('[AutoComment] >>>[7] shouldAutoSubmit 检查完成，开始判断...');
         if (shouldAutoSubmit) {
-          // 确保所有表单字段都已填好（name/email/website/comment），再点击提交
+          console.log('[AutoComment] >>>[8] shouldAutoSubmit 为 true，准备自动提交...');
+          setStatus('正在自动提交评论，请稍候…', '#9ca3af');
+
+          // 确保所有表单字段都已填好，再点击提交按钮
           const fillResult = await ensureAllCommentFormFieldsFilled(text);
 
           if (!fillResult.success) {
-            const msg = '自动提交已跳过，以下字段缺失：' + fillResult.missingFields.join('、');
+            const msg = '以下字段缺失，无法自动提交：' + fillResult.missingFields.join('、');
             setStatus(msg + '，请手动检查', '#f97373');
-            console.log('[AutoComment] 自动提交跳过 - 字段缺失:', fillResult.missingFields);
-            // 仍尝试提交（字段可能已被页面 JS 填入）
-          } else {
-            setStatus('所有字段已填好，正在自动提交评论…', '#22c55e');
+            console.error('[AutoComment] 自动提交跳过 - 字段缺失:', fillResult.missingFields);
+            setGenerateLoading(false);
+            return;
           }
 
           const submitButton = findCommentSubmitButton();
-          if (submitButton) {
-            if (!isButtonClickable(submitButton)) {
-              setStatus('字段已填好，但提交按钮不可见，请手动提交', '#f59e0b');
-            } else {
-              // 再等待一小段时间确保页面 JS（如验证逻辑）已完成初始化
-              await new Promise(resolve => setTimeout(resolve, 400));
-              const result = await clickCommentSubmitButton();
-              if (result.success) {
-                setStatus('评论已自动提交！', '#22c55e');
-              } else {
-                setStatus('自动提交失败：' + (result.error || '未知错误') + '，请手动提交', '#f97373');
-              }
-            }
-          } else {
-            setStatus('生成完成！未找到提交按钮，请手动提交', '#f59e0b');
+          if (!submitButton) {
+            setStatus('未找到提交按钮，请手动提交', '#f59e0b');
+            setGenerateLoading(false);
+            return;
           }
+
+          if (!isButtonClickable(submitButton)) {
+            setStatus('提交按钮不可见，请手动检查', '#f59e0b');
+            setGenerateLoading(false);
+            return;
+          }
+
+          // 等待一小段时间确保页面 JS 验证逻辑已完成初始化
+          await new Promise(resolve => setTimeout(resolve, 600));
+
+          const result = await clickCommentSubmitButton();
+          if (result.success) {
+            setStatus('评论已自动提交！', '#22c55e');
+          } else {
+            setStatus('自动提交失败：' + (result.error || '未知错误') + '，请手动提交', '#f97373');
+          }
+        console.log('[AutoComment] >>>[7b] shouldAutoSubmit 为 false，仅填充文案');
         } else {
-          // 检查是否找到提交按钮，如果找到则高亮提示
+          // 未开启自动提交，仅填充文案并高亮提交按钮
+          console.log('[AutoComment] >>>[9] 未开启自动提交，仅填充文案并高亮按钮...');
+          setStatus('生成完成！文案已填入评论框，勾选"自动提交"即可全自动发送', '#22c55e');
+
           const submitButton = findCommentSubmitButton();
           if (submitButton) {
+            console.log('[AutoComment] >>>[10] 找到提交按钮，高亮显示...');
             submitButton.scrollIntoView({ behavior: 'smooth', block: 'center' });
             submitButton.style.outline = '3px solid #22c55e';
             submitButton.style.outlineOffset = '2px';
@@ -2386,14 +2417,15 @@
               submitButton.style.outline = '';
               submitButton.style.outlineOffset = '';
             }, 3000);
+          } else {
+            console.log('[AutoComment] >>>[11] 未找到提交按钮');
           }
-          setStatus('生成完成！文案已填入评论框，点击「自动提交评论」发送', '#22c55e');
         }
+        setGenerateLoading(false);
       } catch (err) {
         const msg = (err && err.message) || '生成失败，请检查控制台日志。';
         setStatus(msg, '#f97373');
         setCopyEnabled(false);
-      } finally {
         setGenerateLoading(false);
       }
     });
