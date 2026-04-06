@@ -7,6 +7,7 @@ const USER_NAME_STORAGE_KEY = 'auto_fill_user_name';
 const USER_EMAIL_STORAGE_KEY = 'auto_fill_user_email';
 const USER_PASSWORD_STORAGE_KEY = 'auto_fill_user_password';
 const AUTO_GENERATE_QWEN_ON_PAGE_LOAD_KEY = 'auto_generate_qwen_on_page_load';
+const AUTO_SUBMIT_COMMENT_KEY = 'auto_submit_comment';
 const USER_ID_STORAGE_KEY = 'auto_comment_user_id';
 
 // ====== 积分系统配置 ======
@@ -17,6 +18,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const websiteUrlInput = document.getElementById('websiteUrl');
   const autoOpenPanelCheckbox = document.getElementById('autoOpenPanel');
   const autoGenerateOnLoadCheckbox = document.getElementById('autoGenerateOnLoad');
+  const autoSubmitCommentCheckbox = document.getElementById('autoSubmitComment');
   const userNameInput = document.getElementById('userName');
   const userEmailInput = document.getElementById('userEmail');
   const userPasswordInput = document.getElementById('userPassword');
@@ -48,23 +50,25 @@ document.addEventListener('DOMContentLoaded', () => {
     '请严格根据我提供的"当前网站内容"进行分析和创作，不要凭空捏造网站不存在的功能或信息。',
     '',
     '【输出要求】',
-    '1. 我需要在该网站发表评论，关联到我的网站【请在此处输入网站链接】，并吸引用户点击访问我的网站。',
+    '1. 我需要在该网站发表评论，关联到我的网站【请在此处输入网站链接】，我的网站内容是关于【请在此处输入网站内容】',
     '2. 语气可以专业但要自然、真实，避免夸张、虚假宣传。',
-    '3. 使用网站的主要语言作为输出语言，字数建议控制在 100词。',
+    '3. 使用当前网站内容的主要语言作为输出语言，字数建议控制在 100词。',
     '4. 只要评论的语句，不要输出其他无关的句子。'
   ].join('\n');
 
   // 初始化时从 chrome.storage.sync 读取
   chrome.storage.sync.get(
-    [
-      SKILL_TEMPLATE_STORAGE_KEY,
-      WEBSITE_URL_STORAGE_KEY,
-      AUTO_OPEN_QWEN_PANEL_KEY,
-      USER_NAME_STORAGE_KEY,
-      USER_EMAIL_STORAGE_KEY,
-      USER_PASSWORD_STORAGE_KEY,
-      USER_ID_STORAGE_KEY
-    ],
+      [
+        SKILL_TEMPLATE_STORAGE_KEY,
+        WEBSITE_URL_STORAGE_KEY,
+        AUTO_OPEN_QWEN_PANEL_KEY,
+        USER_NAME_STORAGE_KEY,
+        USER_EMAIL_STORAGE_KEY,
+        USER_PASSWORD_STORAGE_KEY,
+        USER_ID_STORAGE_KEY,
+        AUTO_GENERATE_QWEN_ON_PAGE_LOAD_KEY,
+        AUTO_SUBMIT_COMMENT_KEY
+      ],
     (result) => {
       if (chrome.runtime.lastError) {
         console.error('读取设置失败：', chrome.runtime.lastError);
@@ -95,6 +99,9 @@ document.addEventListener('DOMContentLoaded', () => {
       // 读取已保存的用户ID
       if (result && typeof result[USER_ID_STORAGE_KEY] === 'string' && result[USER_ID_STORAGE_KEY]) {
         userIdInput.value = result[USER_ID_STORAGE_KEY];
+      }
+      if (result && typeof result[AUTO_SUBMIT_COMMENT_KEY] === 'boolean') {
+        autoSubmitCommentCheckbox.checked = result[AUTO_SUBMIT_COMMENT_KEY];
       }
     }
   );
@@ -137,6 +144,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const websiteUrl = websiteUrlInput.value.trim();
     const autoOpenPanel = !!autoOpenPanelCheckbox.checked;
     const autoGenerateOnLoad = !!autoGenerateOnLoadCheckbox.checked;
+    const autoSubmitComment = !!autoSubmitCommentCheckbox.checked;
     const userName = userNameInput.value.trim();
     const userEmail = userEmailInput.value.trim();
     const userPassword = userPasswordInput.value.trim();
@@ -149,7 +157,8 @@ document.addEventListener('DOMContentLoaded', () => {
         [USER_NAME_STORAGE_KEY]: userName,
         [USER_EMAIL_STORAGE_KEY]: userEmail,
         [USER_PASSWORD_STORAGE_KEY]: userPassword,
-        [AUTO_GENERATE_QWEN_ON_PAGE_LOAD_KEY]: autoGenerateOnLoad
+        [AUTO_GENERATE_QWEN_ON_PAGE_LOAD_KEY]: autoGenerateOnLoad,
+        [AUTO_SUBMIT_COMMENT_KEY]: autoSubmitComment
       },
       () => {
         if (chrome.runtime.lastError) {

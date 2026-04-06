@@ -2,7 +2,7 @@
 chrome.action.onClicked.addListener((tab) => {
   if (tab && tab.id != null) {
     chrome.tabs.sendMessage(tab.id, {
-      type: 'TOGGLE_PROMOTE_WITH_QWEN_PANEL'
+      type: 'TOGGLE_PROMOTE_PANEL'
     });
   }
 });
