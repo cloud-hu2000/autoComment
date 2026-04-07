@@ -845,7 +845,7 @@
         if (typeof qwenPanelEl._qwenSetStatus === 'function') {
           qwenPanelEl._qwenSetStatus(msg, '#f97373');
         }
-        console.error('[AutoComment-AutoLoad] ' + msg);
+        console.error('[AutoComment-AutoLoad] ' + msg   );
         return;
       }
 
@@ -1933,12 +1933,11 @@
       action: form.action
     });
 
-    // ── 步骤2：在表单中找所有输入框 ───────────────────────────
-    // querySelectorAll 递归查找，包括 <p><input> 等嵌套结构
-    const formInputs = Array.from(form.querySelectorAll('input'));
+    // ── 步骤2：统计表单中所有输入框（用于日志）───────────────
+    const formAllInputs = Array.from(form.querySelectorAll('input'));
     const formTextareas = Array.from(form.querySelectorAll('textarea'));
-    console.log('[AutoComment] 表单中的 input 数量:', formInputs.length, 'textarea 数量:', formTextareas.length);
-    console.log('[AutoComment] 表单中所有 input:', formInputs.map(i => ({
+    console.log('[AutoComment] 表单中的 input 数量:', formAllInputs.length, 'textarea 数量:', formTextareas.length);
+    console.log('[AutoComment] 表单中所有 input:', formAllInputs.map(i => ({
       name: i.name, id: i.id, type: i.type, className: i.className,
       placeholder: i.placeholder, valueLen: (i.value || '').length
     })));
@@ -1967,16 +1966,26 @@
     }
 
     // ── 步骤4：找 Name 输入框 ─────────────────────────────────
-    // 直接用 WordPress 标准 ID
-    const nameInputById = form.querySelector('#author') ||
-                          form.querySelector('input[name="author"]') ||
-                          form.querySelector('input[id*="author"]');
-    // 再用关键词匹配（兜底）
-    let nameInput = nameInputById || formInputs.find((input) => {
-      if (['hidden', 'email', 'password', 'checkbox', 'radio'].includes((input.type || '').toLowerCase())) return false;
-      const t = `${input.name || ''} ${input.id || ''} ${input.placeholder || ''}`.toLowerCase();
-      return ['name', 'your-name', 'author', 'nickname', 'nick', 'fullname', 'full-name', 'display-name', 'contact', '联系人', '姓名', '名字', 'nombre'].some(k => t.includes(k));
-    });
+    // 直接选择器 + closest 验证（不依赖 formInputs 集合，避免遗漏嵌套字段）
+    let nameInput = null;
+    const nameSelectors = [
+      '#author', 'input[name="author"]',
+      'input[id*="author" i]', 'input[class*="author" i]',
+      'input[name="name"]', 'input[name="your-name"]',
+      'input[id="name"]', 'input[id="author-name"]',
+      'input[placeholder*="name" i]', 'input[placeholder*="姓名" i]',
+      'input[placeholder*="昵称" i]', 'input[placeholder*="名字" i]'
+    ];
+    for (const sel of nameSelectors) {
+      try {
+        const el = form.querySelector(sel);
+        if (el && el.tagName === 'INPUT' && el.closest('form') === form) {
+          nameInput = el;
+          console.log('[AutoComment] 通过选择器找到 nameInput:', sel, { name: nameInput.name, id: nameInput.id, type: nameInput.type });
+          break;
+        }
+      } catch (_) {}
+    }
     if (nameInput) {
       console.log('[AutoComment] 找到 nameInput:', { name: nameInput.name, id: nameInput.id, type: nameInput.type });
     } else {
@@ -1984,19 +1993,23 @@
     }
 
     // ── 步骤5：找 Email 输入框 ───────────────────────────────
-    const emailInputById = form.querySelector('#email') ||
-                           form.querySelector('input[name="email"]') ||
-                           form.querySelector('input[type="email"]');
     let emailInput = null;
-    if (emailInputById) {
-      emailInput = emailInputById;
-    } else {
-      emailInput = formInputs.find((input) => {
-        if (['hidden', 'password', 'checkbox', 'radio'].includes((input.type || '').toLowerCase())) return false;
-        if ((input.type || '').toLowerCase() === 'email') return true;
-        const t = `${input.name || ''} ${input.id || ''} ${input.placeholder || ''}`.toLowerCase();
-        return ['email', 'e-mail', 'mail'].some(k => t.includes(k));
-      });
+    const emailSelectors = [
+      '#email', 'input[name="email"]', 'input[type="email"]',
+      'input[id="mail"]', 'input[name="mail"]',
+      'input[id*="email" i]', 'input[class*="email" i]',
+      'input[placeholder*="email" i]', 'input[placeholder*="邮箱" i]',
+      'input[placeholder*="mail" i]'
+    ];
+    for (const sel of emailSelectors) {
+      try {
+        const el = form.querySelector(sel);
+        if (el && el.tagName === 'INPUT' && el.closest('form') === form) {
+          emailInput = el;
+          console.log('[AutoComment] 通过选择器找到 emailInput:', sel, { name: emailInput.name, id: emailInput.id, type: emailInput.type });
+          break;
+        }
+      } catch (_) {}
     }
     if (emailInput) {
       console.log('[AutoComment] 找到 emailInput:', { name: emailInput.name, id: emailInput.id, type: emailInput.type });
@@ -2005,18 +2018,22 @@
     }
 
     // ── 步骤6：找 Website 输入框 ─────────────────────────────
-    const urlInputById = form.querySelector('#url') ||
-                         form.querySelector('input[name="url"]') ||
-                         form.querySelector('input[type="url"]');
     let websiteInput = null;
-    if (urlInputById) {
-      websiteInput = urlInputById;
-    } else {
-      websiteInput = formInputs.find((input) => {
-        if (['hidden', 'email', 'password', 'checkbox', 'radio'].includes((input.type || '').toLowerCase())) return false;
-        const t = `${input.name || ''} ${input.id || ''} ${input.placeholder || ''}`.toLowerCase();
-        return ['website', 'site', 'homepage', 'url', 'link', 'web', '网站', '网址'].some(k => t.includes(k));
-      });
+    const urlSelectors = [
+      '#url', 'input[name="url"]', 'input[type="url"]',
+      'input[id="website"]', 'input[name="website"]',
+      'input[placeholder*="website" i]', 'input[placeholder*="网站" i]',
+      'input[placeholder*="url" i]'
+    ];
+    for (const sel of urlSelectors) {
+      try {
+        const el = form.querySelector(sel);
+        if (el && el.tagName === 'INPUT' && el.closest('form') === form) {
+          websiteInput = el;
+          console.log('[AutoComment] 通过选择器找到 websiteInput:', sel);
+          break;
+        }
+      } catch (_) {}
     }
     if (websiteInput) {
       console.log('[AutoComment] 找到 websiteInput:', { name: websiteInput.name, id: websiteInput.id, type: websiteInput.type });
