@@ -2732,75 +2732,6 @@
 
     injectOutlinkHighlightStyle();
 
-    // ====== 自动提交评论按钮 ======
-    const autoSubmitBtn = document.createElement('button');
-    autoSubmitBtn.textContent = '自动提交评论';
-    autoSubmitBtn.style.border = 'none';
-    autoSubmitBtn.style.borderRadius = '999px';
-    autoSubmitBtn.style.padding = '7px 10px';
-    autoSubmitBtn.style.fontSize = '12px';
-    autoSubmitBtn.style.cursor = 'pointer';
-    autoSubmitBtn.style.background = 'rgba(15,23,42,0.8)';
-    autoSubmitBtn.style.color = '#e5e7eb';
-    autoSubmitBtn.style.border = '1px solid rgba(148,163,184,0.6)';
-
-    let autoSubmitEnabled = false;
-    let autoSubmitIntervalId = null;
-
-    function setAutoSubmitEnabled(enabled) {
-      autoSubmitEnabled = enabled;
-      autoSubmitBtn.style.background = enabled
-        ? 'linear-gradient(135deg, #22c55e, #16a34a)'
-        : 'rgba(15,23,42,0.8)';
-      autoSubmitBtn.style.color = enabled ? '#f9fafb' : '#e5e7eb';
-      autoSubmitBtn.style.boxShadow = enabled
-        ? '0 4px 12px rgba(34,197,94,0.4)'
-        : 'none';
-    }
-
-    autoSubmitBtn.addEventListener('click', async () => {
-      if (autoSubmitEnabled) {
-        // 停止自动提交
-        if (autoSubmitIntervalId) {
-          clearInterval(autoSubmitIntervalId);
-          autoSubmitIntervalId = null;
-        }
-        setAutoSubmitEnabled(false);
-        setStatus('已停止自动提交', '#9ca3af');
-        return;
-      }
-
-      // 检查是否有文案
-      const currentText = textarea.value.trim();
-      if (!currentText) {
-        setStatus('请先生成或输入评论文案', '#f97373');
-        return;
-      }
-
-      // 检查是否找到提交按钮
-      const submitButton = findCommentSubmitButton();
-      if (!submitButton) {
-        setStatus('未找到评论提交按钮', '#f97373');
-        return;
-      }
-
-      if (!isButtonClickable(submitButton)) {
-        setStatus('提交按钮不可见或被禁用', '#f97373');
-        return;
-      }
-
-      // 启用自动提交模式
-      setAutoSubmitEnabled(true);
-      setStatus('自动提交已启用，将自动点击提交按钮...', '#22c55e');
-
-      // 立即尝试提交
-      const result = await clickCommentSubmitButton();
-      if (!result.success) {
-        setStatus(result.error || '提交失败', '#f97373');
-        setAutoSubmitEnabled(false);
-      }
-    });
-
     const highlightBtn = document.createElement('button');
     highlightBtn.textContent = outlinkHighlightEnabled ? '取消高亮' : '高亮外链';
     highlightBtn.style.border = 'none';
@@ -2834,7 +2765,6 @@
     outlinkBtn.addEventListener('click', showOutlinksPanel);
 
     btnRow.appendChild(generateBtn);
-    btnRow.appendChild(autoSubmitBtn);
     btnRow.appendChild(highlightBtn);
     btnRow.appendChild(outlinkBtn);
     btnRow.appendChild(copyBtn);
