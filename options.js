@@ -219,4 +219,106 @@ document.addEventListener('DOMContentLoaded', () => {
       fetchPointsBalance(result[USER_ID_STORAGE_KEY]);
     }
   });
+
+  // ====== 配置导入/导出功能 ======
+  const CONFIG_VERSION = 1;
+  const ALL_STORAGE_KEYS = [
+    SKILL_TEMPLATE_STORAGE_KEY,
+    WEBSITE_URL_STORAGE_KEY,
+    AUTO_OPEN_QWEN_PANEL_KEY,
+    USER_NAME_STORAGE_KEY,
+    USER_EMAIL_STORAGE_KEY,
+    USER_PASSWORD_STORAGE_KEY,
+    USER_ID_STORAGE_KEY,
+    AUTO_GENERATE_QWEN_ON_PAGE_LOAD_KEY,
+    AUTO_SUBMIT_COMMENT_KEY
+  ];
+
+  const exportConfigBtn = document.getElementById('exportConfigBtn');
+  const importConfigBtn = document.getElementById('importConfigBtn');
+  const importConfigFileInput = document.getElementById('importConfigFileInput');
+  const importExportStatus = document.getElementById('importExportStatus');
+
+  function showImportExportStatus(text, isError) {
+    importExportStatus.textContent = text;
+    importExportStatus.style.color = isError ? '#dc2626' : '#b45309';
+    importExportStatus.style.opacity = '1';
+    setTimeout(() => {
+      importExportStatus.style.opacity = '0';
+    }, 3000);
+  }
+
+  // 导出配置
+  if (exportConfigBtn) {
+    exportConfigBtn.addEventListener('click', () => {
+      chrome.storage.sync.get(ALL_STORAGE_KEYS, (result) => {
+        if (chrome.runtime.lastError) {
+          showImportExportStatus('导出失败：' + chrome.runtime.lastError.message, true);
+          return;
+        }
+        const config = {
+          _version: CONFIG_VERSION,
+          _exportTime: new Date().toISOString(),
+          data: {}
+        };
+        ALL_STORAGE_KEYS.forEach(key => {
+          config.data[key] = result[key];
+        });
+        const blob = new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'autocomment-config-' + new Date().toISOString().slice(0, 10) + '.json';
+        a.click();
+        URL.revokeObjectURL(url);
+        showImportExportStatus('配置已导出！', false);
+      });
+    });
+  }
+
+  // 导入配置
+  if (importConfigBtn && importConfigFileInput) {
+    importConfigBtn.addEventListener('click', () => {
+      importConfigFileInput.click();
+    });
+
+    importConfigFileInput.addEventListener('change', (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        try {
+          const config = JSON.parse(ev.target.result);
+          if (!config || !config.data) {
+            showImportExportStatus('文件格式无效，不是有效的配置文件。', true);
+            return;
+          }
+          // 过滤出有效字段
+          const toSave = {};
+          ALL_STORAGE_KEYS.forEach(key => {
+            if (config.data[key] !== undefined) {
+              toSave[key] = config.data[key];
+            }
+          });
+          chrome.storage.sync.set(toSave, () => {
+            if (chrome.runtime.lastError) {
+              showImportExportStatus('导入失败：' + chrome.runtime.lastError.message, true);
+              return;
+            }
+            showImportExportStatus('配置已导入！页面将自动刷新…', false);
+            // 重新读取并更新表单显示
+            setTimeout(() => {
+              location.reload();
+            }, 1500);
+          });
+        } catch (err) {
+          showImportExportStatus('解析文件失败：' + err.message, true);
+        }
+      };
+      reader.readAsText(file);
+      // 清空 input 以便下次选择同一文件
+      importConfigFileInput.value = '';
+    });
+  }
 });

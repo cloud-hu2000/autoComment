@@ -2674,101 +2674,6 @@
       document.body.appendChild(panel);
     }
 
-    // ====== 外链高亮 ======
-    const OUTLINK_HIGHLIGHT_CLASS = 'auto-comment-outlink-highlight';
-    let outlinkHighlightEnabled = false;
-
-    function normalizeHost(hostname) {
-      return hostname.replace(/^www\./, '').toLowerCase();
-    }
-
-    function isSameSite(hostname) {
-      const normalizedCurrent = normalizeHost(window.location.hostname);
-      const normalizedLink = normalizeHost(hostname);
-      if (normalizedCurrent === normalizedLink) return true;
-      if (normalizedLink.endsWith('.' + normalizedCurrent)) return true;
-      if (normalizedCurrent.endsWith('.' + normalizedLink)) return true;
-      return false;
-    }
-
-    function highlightExternalLinks() {
-      const links = Array.from(document.querySelectorAll('a[href]'));
-      links.forEach(link => {
-        const href = link.href;
-        try {
-          const url = new URL(href);
-          if (url.protocol === 'mailto:' ||
-              url.protocol === 'tel:' ||
-              url.protocol === 'javascript:' ||
-              href.startsWith('#')) {
-            return;
-          }
-          if (isSameSite(url.hostname)) {
-            return;
-          }
-          link.classList.add(OUTLINK_HIGHLIGHT_CLASS);
-        } catch (e) {}
-      });
-    }
-
-    function removeOutlinkHighlights() {
-      const highlighted = document.querySelectorAll('.' + OUTLINK_HIGHLIGHT_CLASS);
-      highlighted.forEach(link => {
-        link.classList.remove(OUTLINK_HIGHLIGHT_CLASS);
-      });
-    }
-
-    function toggleOutlinkHighlight() {
-      outlinkHighlightEnabled = !outlinkHighlightEnabled;
-      if (outlinkHighlightEnabled) {
-        highlightExternalLinks();
-      } else {
-        removeOutlinkHighlights();
-      }
-      return outlinkHighlightEnabled;
-    }
-
-    function injectOutlinkHighlightStyle() {
-      if (document.getElementById('auto-comment-outlink-style')) return;
-      const style = document.createElement('style');
-      style.id = 'auto-comment-outlink-style';
-      style.textContent = [
-        'a.' + OUTLINK_HIGHLIGHT_CLASS + ' {',
-        '  background-color: #fef08a !important;',
-        '  outline: 2px solid #eab308 !important;',
-        '  border-radius: 2px;',
-        '  transition: background-color 0.2s, outline 0.2s;',
-        '}',
-        'a.' + OUTLINK_HIGHLIGHT_CLASS + ':hover {',
-        '  background-color: #fde047 !important;',
-        '  outline-color: #ca8a04 !important;',
-        '}'
-      ].join('\n');
-      document.head.appendChild(style);
-    }
-
-    injectOutlinkHighlightStyle();
-
-    const highlightBtn = document.createElement('button');
-    highlightBtn.textContent = outlinkHighlightEnabled ? '取消高亮' : '高亮外链';
-    highlightBtn.style.border = 'none';
-    highlightBtn.style.borderRadius = '999px';
-    highlightBtn.style.padding = '7px 10px';
-    highlightBtn.style.fontSize = '12px';
-    highlightBtn.style.cursor = 'pointer';
-    highlightBtn.style.background = outlinkHighlightEnabled
-      ? 'linear-gradient(135deg, #2563eb, #4f46e5)'
-      : 'rgba(15,23,42,0.8)';
-    highlightBtn.style.color = '#e5e7eb';
-    highlightBtn.style.border = '1px solid rgba(148,163,184,0.6)';
-    highlightBtn.addEventListener('click', () => {
-      const enabled = toggleOutlinkHighlight();
-      highlightBtn.textContent = enabled ? '取消高亮' : '高亮外链';
-      highlightBtn.style.background = enabled
-        ? 'linear-gradient(135deg, #2563eb, #4f46e5)'
-        : 'rgba(15,23,42,0.8)';
-    });
-
     const outlinkBtn = document.createElement('button');
     outlinkBtn.textContent = '分析外链';
     outlinkBtn.style.border = 'none';
@@ -2782,7 +2687,6 @@
     outlinkBtn.addEventListener('click', showOutlinksPanel);
 
     btnRow.appendChild(generateBtn);
-    btnRow.appendChild(highlightBtn);
     btnRow.appendChild(outlinkBtn);
     btnRow.appendChild(copyBtn);
   }
@@ -2792,10 +2696,6 @@
     chrome.runtime.onMessage.addListener((message, _sender, _sendResponse) => {
       if (message && message.type === 'TOGGLE_PROMOTE_PANEL') {
         createOrToggleQwenPanel();
-      }
-      if (message && message.type === 'TOGGLE_OUTLINK_HIGHLIGHT') {
-        const enabled = toggleOutlinkHighlight();
-        if (_sendResponse) _sendResponse({ enabled });
       }
     });
   }

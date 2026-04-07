@@ -156,8 +156,7 @@
           <span id="pointsStatus" class="status">已保存</span>
         </div>
         <div class="hint" style="margin-top: 8px;">
-          - 用户 ID 由管理员线下分配，用于关联你的积分账户。<br />
-          - 点击"保存并刷新积分"后，积分余额会自动从服务器查询并更新。
+          - 用户 ID 由管理员线下分配，用于关联你的积分账户。
         </div>
         <div style="margin-top: 10px; display: flex; align-items: center; gap: 10px;">
           <span style="font-size: 12px; color: #374151; font-weight: 600;">积分余额：</span>
@@ -187,19 +186,16 @@
       <div style="margin-top: 20px">
         <label>自动填表的信息</label>
         <div class="hint">
-          - 这里配置的内容会用于注册表单和评论表单中的 Website / URL / Name / Email / Password / 网址 / 姓名 / 邮箱 / 密码 等字段。
+          - 这里配置的内容会用于评论表单中的 Website / URL / Name / Email 等信息
         </div>
         <div style="margin-top: 10px">
-          <label for="websiteUrl" style="font-weight: 500; font-size: 12px">用于评论推广的个人网站链接</label>
+          <label for="websiteUrl" style="font-weight: 500; font-size: 12px">你的网站链接</label>
           <input
             type="url"
             id="websiteUrl"
             placeholder="https://example.com"
             autocomplete="off"
           />
-          <div class="hint">
-            - 在评论表单中自动填充到 Website / URL / 网址 字段。<br />
-          </div>
         </div>
 
         <div style="margin-top: 16px">
@@ -230,9 +226,6 @@
               />
             </div>
           </div>
-          <div class="hint">
-            - 用于自动填写注册表单和评论表单中的 Name / Email / Password / 姓名 / 邮箱 / 密码 字段。<br />
-          </div>
         </div>
       </div>
 
@@ -245,7 +238,7 @@
           页面加载后自动打开"网站推广助手"浮动窗口
         </label>
         <div class="hint">
-          - 勾选后，每次打开页面都会在右下角自动弹出推广助手窗口，方便连续撰写评论。<br />
+          - 勾选后，每次打开页面都会在右下角自动弹出推广助手窗口。<br />
         </div>
       </div>
 
@@ -255,7 +248,7 @@
           style="display: flex; align-items: center; gap: 8px; font-weight: 600"
         >
           <input type="checkbox" id="autoGenerateOnLoad" />
-          允许在页面加载时自动调用 AI 生成推广文案
+          在页面加载时自动调用 AI 生成推广文案
         </label>
         <div class="hint">
           - 勾选后，在检测到评论框后，自动调用 AI 生成推广文案。
@@ -271,15 +264,14 @@
           AI 生成文案后自动提交评论（无需手动点击）
         </label>
         <div class="hint">
-          - 勾选后，生成文案并填入评论框后，将自动点击"Post Comment"按钮。<br />
-          - 此功能会模拟真实鼠标操作以绕过部分反垃圾机制。
+          - 勾选后，生成文案并填入评论框后，将自动点击"发送评论"按钮。<br />
         </div>
       </div>
 
       <!-- 联系方式 -->
       <div style="margin-top: 24px; padding: 14px 16px; background: #f0fdf4; border-radius: 10px; border: 1px solid #bbf7d0;">
         <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
-          <span style="font-size: 13px; font-weight: 700; color: #15803d;">联系我们</span>
+          <span style="font-size: 13px; font-weight: 700; color: #15803d;">联系作者</span>
         </div>
         <div style="font-size: 13px; color: #374151; line-height: 1.6;">
           如有问题或建议，欢迎联系微信：<strong style="color: #15803d;">cloudhu2000</strong>
@@ -289,6 +281,22 @@
       <div class="row">
         <button id="saveSettingsBtn" class="btn btn-primary">保存</button>
         <span id="settingsStatus" class="status">已保存</span>
+      </div>
+
+      <!-- 配置导入/导出 -->
+      <div style="margin-top: 20px; padding: 14px 16px; background: #fffbeb; border-radius: 10px; border: 1px solid #fde68a;">
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+          <span style="font-size: 13px; font-weight: 700; color: #b45309;">配置备份与恢复</span>
+        </div>
+        <div class="hint" style="margin-bottom: 10px;">
+          - 每次重新部署扩展后，配置会重置。请使用"导出配置"将当前设置保存为文件。
+        </div>
+        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+          <button id="exportConfigBtn" class="btn btn-secondary">导出配置</button>
+          <button id="importConfigBtn" class="btn btn-secondary">导入配置</button>
+          <input type="file" id="importConfigFileInput" accept=".json" style="display: none;" />
+          <span id="importExportStatus" class="status" style="color: #b45309;"></span>
+        </div>
       </div>
     </div>
 
