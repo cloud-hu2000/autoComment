@@ -1296,6 +1296,7 @@
     const wpSelectors = [
       '#submit',
       '#submit-btn',
+      '#publish',
       'input#submit',
       'input[type="submit"]#submit',
       '.submit',
@@ -1304,7 +1305,11 @@
       '[name="submit"]',
       'input[name="submit"]',
       'button[name="submit"]',
-      'input[type="submit"][name="submit"]'
+      'input[type="submit"][name="submit"]',
+      'input[name="publish"]',
+      'button[name="publish"]',
+      '.publish',
+      '#wp-submit'
     ];
 
     for (const selector of wpSelectors) {
@@ -1332,12 +1337,13 @@
         const id = (btn.id || '').toLowerCase();
         const text = (btn.textContent || '').toLowerCase();
 
-        // 检查是否包含提交相关关键词（包含西班牙语）
+        // 检查是否包含提交相关关键词（包含西班牙语和 publish）
         const submitKeywords = [
           'submit', 'post', 'comment', 'publish', 'publicar',
           'responder', 'enviar', 'reply', 'send', 'comentar',
           'replicar', 'dejar', 'commentaire', 'comentar',
-          'anzeigen', 'absenden', '回答', '返信'
+          'anzeigen', 'absenden', '回答', '返信',
+          'post a comment'
         ];
 
         if (submitKeywords.some(k => value.includes(k) || className.includes(k) || id.includes(k) || text.includes(k))) {
@@ -1402,11 +1408,14 @@
       '#submit',
       '#submit-btn',
       '#submit-button',
+      '#publish',
+      '#wp-submit',
       'input#submit',
       'input[type="submit"]#submit',
       '.submit',
       '.submit-btn',
       '.submit-button',
+      '.publish',
       'input.submit',
       'button.submit',
       '.comment-submit',
