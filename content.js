@@ -2697,6 +2697,89 @@
       if (message && message.type === 'TOGGLE_PROMOTE_PANEL') {
         createOrToggleQwenPanel();
       }
+      // 批量处理模式：收到任务后自动执行评论流程
+      if (message && message.type === 'BATCH_HANDLE') {
+        handleBatchTask(message.batchId, message.urlId, message.url, message.originalIndex);
+      }
     });
+  }
+
+  // ==================== 批量处理任务函数 ====================
+  /**
+   * 批量模式：自动完成评论流程并上报结果
+   */
+  function handleBatchTask(batchId, urlId, url, originalIndex) {
+    // 等待页面加载完成
+    waitForPageReady()
+      .then(() => autoFillCommentForm())
+      .then(() => generateAndFillContent())
+      .then((aiContent) => {
+        // 自动提交评论
+        return submitCommentForm().then(() => aiContent);
+      })
+      .then((aiContent) => {
+        // 上报成功
+        reportBatchResult(batchId, urlId, 'success', aiContent, null);
+      })
+      .catch((err) => {
+        // 上报失败
+        reportBatchResult(batchId, urlId, 'fail', null, err.message || String(err));
+      });
+  }
+
+  /**
+   * 等待页面关键元素加载
+   */
+  function waitForPageReady() {
+    return new Promise((resolve) => {
+      // 等待评论框或页面��载完毕
+      const maxWait = 10000;
+      const start = Date.now();
+      const check = () => {
+        if (Date.now() - start > maxWait) {
+          resolve(); // 超时也继续
+          return;
+        }
+        const hasCommentArea =
+          document.querySelector('textarea[name*="comment" i], textarea[name*="reply" i], textarea[name*="message" i], #comment, #comments, .comment-form, textarea') ||
+          document.querySelector('form');
+        if (hasCommentArea) {
+          setTimeout(resolve, 2000); // 额外等2秒让JS渲染完
+        } else {
+          setTimeout(check, 500);
+        }
+      };
+      check();
+    });
+  }
+
+  /**
+   * 上报批量任务结果到后端
+   */
+  async function reportBatchResult(batchId, urlId, result, aiContent, errorMessage) {
+    const apiBase = 'https://jieyunsang.cn/api';
+
+    // 先从存储中获取 userId
+    const userId = await new Promise((resolve) => {
+      if (typeof chrome !== 'undefined' && chrome.storage) {
+        chrome.storage.sync.get(['userId'], (data) => resolve(data.userId || ''));
+      } else {
+        resolve('');
+      }
+    });
+
+    // 通过 fetch 上报（绕过 content script 的 CORS 限制，使用 navigate 方式）
+    // 由于 content script 无法直接调用 API，使用以下方式：
+    // 1. 通过 chrome.runtime.sendMessage 转发给 background
+    if (typeof chrome !== 'undefined' && chrome.runtime) {
+      chrome.runtime.sendMessage({
+        type: 'BATCH_REPORT_RESULT',
+        batchId,
+        urlId,
+        result,
+        aiContent,
+        errorMessage
+      });
+    }
   }
 })();

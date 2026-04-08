@@ -26,7 +26,48 @@ function initDb() {
         updated_at  TEXT    NOT NULL DEFAULT (datetime('now'))
       )
     `);
-    console.log('[DB] auto_comment_users 表已就绪，数据库路径:', DB_PATH);
+    console.log('[DB] auto_comment_users 表已就绪');
+
+    // 批量任务批次表
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS batch_jobs (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        batch_id      TEXT    UNIQUE NOT NULL,
+        user_id       TEXT    NOT NULL,
+        total_count   INTEGER DEFAULT 0,
+        pending_count INTEGER DEFAULT 0,
+        success_count INTEGER DEFAULT 0,
+        fail_count    INTEGER DEFAULT 0,
+        status        TEXT    DEFAULT 'pending',
+        created_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+        updated_at    TEXT    NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    console.log('[DB] batch_jobs 表已就绪');
+
+    // 批量 URL 明细表
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS batch_urls (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        batch_id      TEXT    NOT NULL,
+        original_index INTEGER NOT NULL,
+        url           TEXT    NOT NULL,
+        result        TEXT    DEFAULT NULL,
+        result_mark   TEXT    DEFAULT NULL,
+        error_message TEXT    DEFAULT NULL,
+        ai_content    TEXT    DEFAULT NULL,
+        processed_at  TEXT    DEFAULT NULL,
+        created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
+      )
+    `);
+    console.log('[DB] batch_urls 表已就绪');
+
+    // 创建索引
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_batch_urls_batch_result ON batch_urls(batch_id, result)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_batch_jobs_user_status ON batch_jobs(user_id, status)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_batch_jobs_batch_id ON batch_jobs(batch_id)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_batch_urls_batch_id ON batch_urls(batch_id)`);
+    console.log('[DB] 索引已就绪，数据库路径:', DB_PATH);
   } catch (err) {
     console.error('[DB] 初始化表失败:', err.message);
   }

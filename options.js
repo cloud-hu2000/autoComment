@@ -321,4 +321,13 @@ document.addEventListener('DOMContentLoaded', () => {
       importConfigFileInput.value = '';
     });
   }
+
+  // 批量外链评论按钮
+  const openBatchBtn = document.getElementById('openBatchBtn');
+  if (openBatchBtn) {
+    openBatchBtn.addEventListener('click', () => {
+      // 打开 batch.html（需要以 chrome-extension:// URL 打开）
+      chrome.tabs.create({ url: 'batch.html' });
+    });
+  }
 });

@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>批量外链评论 - Auto Register Filler</title>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu,
+          Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+        margin: 0;
+        padding: 20px;
+        background-color: #f5f5f7;
+        color: #1f1f1f;
+      }
+
+      .container {
+        max-width: 700px;
+        margin: 0 auto;
+      }
+
+      h1 {
+        font-size: 20px;
+        margin: 0 0 4px;
+        color: #1f1f1f;
+      }
+
+      .subtitle {
+        font-size: 13px;
+        color: #6b7280;
+        margin-bottom: 20px;
+      }
+
+      .card {
+        background: #ffffff;
+        border-radius: 12px;
+        box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+        padding: 20px 24px;
+        margin-bottom: 16px;
+      }
+
+      .card-title {
+        font-size: 14px;
+        font-weight: 700;
+        color: #374151;
+        margin-bottom: 12px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      /* 上传区域 */
+      .upload-zone {
+        border: 2px dashed #d1d5db;
+        border-radius: 10px;
+        padding: 32px 20px;
+        text-align: center;
+        cursor: pointer;
+        transition: border-color 0.2s, background-color 0.2s;
+        position: relative;
+      }
+
+      .upload-zone:hover,
+      .upload-zone.drag-over {
+        border-color: #2563eb;
+        background-color: #eff6ff;
+      }
+
+      .upload-zone.has-file {
+        border-color: #059669;
+        background-color: #f0fdf4;
+      }
+
+      .upload-icon {
+        font-size: 36px;
+        margin-bottom: 8px;
+      }
+
+      .upload-text {
+        font-size: 14px;
+        color: #6b7280;
+        margin-bottom: 8px;
+      }
+
+      .upload-hint {
+        font-size: 12px;
+        color: #9ca3af;
+      }
+
+      input[type='file'] {
+        display: none;
+      }
+
+      .file-info {
+        display: none;
+        align-items: center;
+        gap: 10px;
+        margin-top: 10px;
+        padding: 10px 14px;
+        background: #f0fdf4;
+        border-radius: 8px;
+        border: 1px solid #bbf7d0;
+      }
+
+      .file-info.visible {
+        display: flex;
+      }
+
+      .file-name {
+        flex: 1;
+        font-size: 13px;
+        font-weight: 500;
+        color: #15803d;
+        word-break: break-all;
+      }
+
+      .file-count {
+        font-size: 12px;
+        color: #15803d;
+        white-space: nowrap;
+      }
+
+      .file-remove {
+        font-size: 18px;
+        color: #9ca3af;
+        cursor: pointer;
+        line-height: 1;
+        padding: 2px 4px;
+      }
+
+      .file-remove:hover { color: #dc2626; }
+
+      /* URL 预览 */
+      .url-preview {
+        display: none;
+        margin-top: 12px;
+        max-height: 200px;
+        overflow-y: auto;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+      }
+
+      .url-preview.visible {
+        display: block;
+      }
+
+      .url-preview table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+      }
+
+      .url-preview th {
+        background: #f9fafb;
+        padding: 8px 10px;
+        text-align: left;
+        font-weight: 600;
+        color: #6b7280;
+        position: sticky;
+        top: 0;
+      }
+
+      .url-preview td {
+        padding: 6px 10px;
+        border-top: 1px solid #f3f4f6;
+        color: #374151;
+        max-width: 400px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .url-preview tr:hover td {
+        background: #f9fafb;
+      }
+
+      /* 操作按钮区域 */
+      .action-bar {
+        display: flex;
+        gap: 8px;
+        margin-top: 16px;
+      }
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        padding: 9px 18px;
+        border-radius: 999px;
+        border: none;
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 600;
+        transition: background-color 0.15s ease, box-shadow 0.15s ease, transform 0.05s ease, opacity 0.15s ease;
+      }
+
+      .btn:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+        pointer-events: none;
+      }
+
+      .btn-primary {
+        background: linear-gradient(135deg, #2563eb, #1d4ed8);
+        color: #ffffff;
+        box-shadow: 0 8px 18px rgba(37, 99, 235, 0.25);
+      }
+
+      .btn-primary:hover {
+        background: linear-gradient(135deg, #1d4ed8, #1e40af);
+        transform: translateY(-0.5px);
+        box-shadow: 0 10px 24px rgba(37, 99, 235, 0.32);
+      }
+
+      .btn-secondary {
+        background: #f3f4f6;
+        color: #374151;
+        border: 1px solid #e5e7eb;
+      }
+
+      .btn-secondary:hover { background: #e5e7eb; }
+
+      .btn-warning {
+        background: #fef3c7;
+        color: #b45309;
+        border: 1px solid #fde68a;
+      }
+
+      .btn-warning:hover { background: #fde68a; }
+
+      .btn-danger {
+        background: #fee2e2;
+        color: #dc2626;
+        border: 1px solid #fca5a5;
+      }
+
+      .btn-danger:hover { background: #fca5a5; }
+
+      /* 进度区域 */
+      .progress-section {
+        display: none;
+      }
+
+      .progress-section.visible {
+        display: block;
+      }
+
+      .progress-bar-wrap {
+        background: #f3f4f6;
+        border-radius: 999px;
+        height: 8px;
+        overflow: hidden;
+        margin-bottom: 8px;
+      }
+
+      .progress-bar {
+        height: 100%;
+        background: linear-gradient(90deg, #2563eb, #1d4ed8);
+        border-radius: 999px;
+        transition: width 0.4s ease;
+        width: 0%;
+      }
+
+      .progress-stats {
+        display: flex;
+        gap: 16px;
+        font-size: 13px;
+        margin-top: 8px;
+      }
+
+      .stat-item {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        color: #6b7280;
+      }
+
+      .stat-item .num {
+        font-weight: 700;
+        font-size: 15px;
+      }
+
+      .stat-success .num { color: #059669; }
+      .stat-fail .num { color: #dc2626; }
+      .stat-pending .num { color: #2563eb; }
+
+      /* 实时日志 */
+      .log-section {
+        display: none;
+        margin-top: 12px;
+        max-height: 240px;
+        overflow-y: auto;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        background: #fafafa;
+      }
+
+      .log-section.visible {
+        display: block;
+      }
+
+      .log-item {
+        padding: 7px 12px;
+        font-size: 12px;
+        border-bottom: 1px solid #f3f4f6;
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+      }
+
+      .log-item:last-child { border-bottom: none; }
+
+      .log-icon {
+        font-weight: 700;
+        flex-shrink: 0;
+        width: 20px;
+        text-align: center;
+      }
+
+      .log-icon.success { color: #059669; }
+      .log-icon.fail { color: #dc2626; }
+      .log-icon.info { color: #2563eb; }
+
+      .log-url {
+        flex: 1;
+        color: #374151;
+        word-break: break-all;
+        font-size: 12px;
+      }
+
+      .log-time {
+        color: #9ca3af;
+        font-size: 11px;
+        flex-shrink: 0;
+      }
+
+      /* 底部操作区 */
+      .footer-actions {
+        display: none;
+        gap: 8px;
+        margin-top: 14px;
+        flex-wrap: wrap;
+      }
+
+      .footer-actions.visible {
+        display: flex;
+      }
+
+      /* 提示信息 */
+      .hint {
+        font-size: 12px;
+        color: #9ca3af;
+        margin-top: 6px;
+      }
+
+      .hint.warn {
+        color: #b45309;
+        background: #fffbeb;
+        padding: 8px 12px;
+        border-radius: 6px;
+        border: 1px solid #fde68a;
+      }
+
+      /* 状态标签 */
+      .status-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 3px 10px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 600;
+      }
+
+      .status-badge.idle { background: #f3f4f6; color: #6b7280; }
+      .status-badge.running { background: #dbeafe; color: #1d4ed8; }
+      .status-badge.paused { background: #fef3c7; color: #b45309; }
+      .status-badge.completed { background: #d1fae5; color: #065f46; }
+
+      .current-status {
+        font-size: 13px;
+        color: #374151;
+        margin-bottom: 10px;
+      }
+
+      /* 积分信息 */
+      .points-bar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12px;
+        color: #6b7280;
+      }
+
+      .points-bar .balance {
+        font-weight: 700;
+        color: #2563eb;
+        font-size: 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+
+      <!-- 标题区 -->
+      <h1>批量外链评论</h1>
+      <div class="subtitle">上传 CSV 文件，批量打开目标页面，自动发送评论并记录结果</div>
+
+      <!-- 文件上传区 -->
+      <div class="card">
+        <div class="card-title">上传 CSV 文件</div>
+        <div class="upload-zone" id="uploadZone">
+          <div class="upload-icon">📂</div>
+          <div class="upload-text">拖拽 CSV 文件到此处，或点击选择文件</div>
+          <div class="upload-hint">支持 .csv 文件，建议不超过 5,000 行</div>
+          <input type="file" id="fileInput" accept=".csv" />
+        </div>
+
+        <div class="file-info" id="fileInfo">
+          <span class="file-name" id="fileName"></span>
+          <span class="file-count" id="fileCount"></span>
+          <span class="file-remove" id="fileRemove" title="移除文件">×</span>
+        </div>
+
+        <div class="url-preview" id="urlPreview">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:50px">#</th>
+                <th>URL</th>
+              </tr>
+            </thead>
+            <tbody id="urlPreviewBody"></tbody>
+          </table>
+        </div>
+
+        <div class="hint" style="margin-top:10px">
+          CSV 文件应包含 URL 列，支持任意列名。首行会被视为表头自动跳过。
+        </div>
+      </div>
+
+      <!-- 积分信息 -->
+      <div class="card">
+        <div class="card-title">积分消耗</div>
+        <div class="current-status">
+          当前状态：<span class="status-badge idle" id="statusBadge">空闲</span>
+        </div>
+        <div class="points-bar">
+          当前积分余额：<span class="balance" id="pointsBalance">—</span>
+          <span id="pointsHint" style="color:#9ca3af"></span>
+        </div>
+        <div id="costHint" class="hint warn" style="display:none; margin-top:8px;"></div>
+      </div>
+
+      <!-- 操作按钮 -->
+      <div class="action-bar" id="actionBar">
+        <button class="btn btn-primary" id="startBtn" disabled>
+          ▶ 开始批量处理
+        </button>
+        <button class="btn btn-warning" id="pauseBtn" style="display:none;">
+          ⏸ 暂停
+        </button>
+        <button class="btn btn-danger" id="stopBtn" style="display:none;">
+          ■ 停止
+        </button>
+      </div>
+
+      <!-- 进度显示 -->
+      <div class="card progress-section" id="progressSection">
+        <div class="card-title">处理进度</div>
+        <div class="progress-bar-wrap">
+          <div class="progress-bar" id="progressBar"></div>
+        </div>
+        <div class="progress-stats">
+          <div class="stat-item stat-success">
+            <span class="num" id="successCount">0</span> 成功
+          </div>
+          <div class="stat-item stat-fail">
+            <span class="num" id="failCount">0</span> 失败
+          </div>
+          <div class="stat-item stat-pending">
+            <span class="num" id="pendingCount">0</span> 待处理
+          </div>
+          <div class="stat-item" style="margin-left:auto">
+            进度：<span class="num" id="progressText">0/0</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 实时日志 -->
+      <div class="card log-section" id="logSection">
+        <div class="card-title">最近处理</div>
+        <div id="logList"></div>
+      </div>
+
+      <!-- 底部操作 -->
+      <div class="footer-actions" id="footerActions">
+        <button class="btn btn-secondary" id="exportBtn">📥 导出结果 CSV</button>
+        <button class="btn btn-secondary" id="clearBtn">清空当前批次</button>
+      </div>
+
+    </div>
+
+    <script src="lib/papaparse.min.js"></script>
+    <script src="batch.js"></script>
+  </body>
+</html>
