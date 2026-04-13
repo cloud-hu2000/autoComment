@@ -9,7 +9,8 @@
   ],
   "host_permissions": [
     "https://dashscope.aliyuncs.com/*",
-    "https://*.vercel.app/*"
+    "https://*.vercel.app/*",
+    "https://jieyunsang.cn/*"
   ],
   "background": {
     "service_worker": "background.js",

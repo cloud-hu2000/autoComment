@@ -4,8 +4,9 @@
 const API_BASE = 'https://jieyunsang.cn/api';
 const MAX_CONCURRENT_TABS = 3;       // 最多同时打开3个标签页
 const POLL_INTERVAL = 3000;          // 轮询间隔（ms）
-const PROCESS_DELAY = 2000;          // 每条处理完成后等待（ms）
 const MAX_RETRY = 3;                 // 最大重试次数
+const TIMEOUT_CHECK_INTERVAL = 5000; // 超时检查间隔（ms）
+const TIMEOUT_STORAGE_KEY = 'batch_timeout_seconds';
 
 // ==================== 状态 ====================
 let batchId = null;
@@ -24,6 +25,15 @@ let pendingCount = 0;
 // 轮询定时器
 let pollTimer = null;
 let processTimer = null;
+
+// 活跃标签页记录 { tabId -> { batchId, urlId, startTime } }
+let activeTabs = new Map();
+
+// 定时器
+let timeoutCheckTimer = null;
+
+// 超时秒数（从 chrome.storage.sync 读取，默认 60）
+let timeoutSeconds = 60;
 
 // ==================== DOM 引用 ====================
 const uploadZone = document.getElementById('uploadZone');
@@ -52,15 +62,18 @@ const pointsBalance = document.getElementById('pointsBalance');
 const pointsHint = document.getElementById('pointsHint');
 const costHint = document.getElementById('costHint');
 const statusBadge = document.getElementById('statusBadge');
+const timeoutInput = document.getElementById('timeoutInput');
 
 // ==================== 初始化 ====================
 document.addEventListener('DOMContentLoaded', init);
 
 let lastResultCount = 0;
+let isPolling = false;
 
 async function init() {
   await loadUserId();
   await loadPoints();
+  await loadTimeoutSetting();
   setupEventListeners();
   restoreSession();
   // 开始轮询 batchResults，更新进度
@@ -83,7 +96,11 @@ function startResultPolling() {
       // 有新结果，更新UI
       for (let i = lastResultCount; i < newResults.length; i++) {
         const r = newResults[i];
-        addLog(r.urlId, r.result, r.errorMessage || (r.result === 'success' ? '评论成功' : '评论失败'));
+        addLog(
+          r.url || String(r.urlId),
+          r.result,
+          r.errorMessage || (r.result === 'success' ? '评论成功' : '评论失败')
+        );
         updateCount(r.result);
       }
       lastResultCount = newResults.length;
@@ -94,7 +111,7 @@ function startResultPolling() {
         onAllCompleted();
       }
     }
-  }, 500);
+  }, 300);
 }
 
 // ==================== 事件绑定 ====================
@@ -143,9 +160,37 @@ function setupEventListeners() {
 
   // 清空批次
   clearBtn.addEventListener('click', clearBatch);
+
+  // 超时配置变化时保存
+  timeoutInput.addEventListener('change', saveTimeoutSetting);
+  timeoutInput.addEventListener('input', () => {
+    const val = parseInt(timeoutInput.value, 10);
+    if (val < 10) timeoutInput.value = '10';
+    if (val > 600) timeoutInput.value = '600';
+  });
 }
 
 // ==================== 文件处理 ====================
+// 读取文件并解码为文本，优先尝试 GBK（中文 Windows 常见编码），兜底 UTF-8
+function readFileAsText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const buffer = e.target.result;
+      // 先尝试 GBK 解码（中文 Windows 默认导出编码）
+      const decoder = new TextDecoder('GBK');
+      let text = decoder.decode(buffer);
+      // GBK 解析后若列名仍然是乱码字符，兜底用 UTF-8 重读
+      if (text.charCodeAt(0) > 0x4DBF && text.slice(0, 4) !== '页面AS') {
+        text = new TextDecoder('UTF-8').decode(buffer);
+      }
+      resolve(text);
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsArrayBuffer(file);
+  });
+}
+
 function handleFile(file) {
   if (!file.name.endsWith('.csv')) {
     alert('请上传 CSV 格式的文件');
@@ -157,55 +202,77 @@ function handleFile(file) {
   fileInfo.classList.add('visible');
   uploadZone.classList.add('has-file');
 
-  Papa.parse(file, {
-    header: false,
-    skipEmptyLines: true,
-    complete: (results) => {
-      const rows = results.data;
-      // 跳过第一行（表头）
-      const dataRows = rows.slice(1);
-      parsedUrls = [];
-      let validCount = 0;
-      let invalidCount = 0;
+  readFileAsText(file).then((csvText) => {
+    const results = Papa.parse(csvText, {
+      header: true,
+      skipEmptyLines: true
+    });
 
-      urlPreviewBody.innerHTML = '';
-      dataRows.forEach((row, idx) => {
-        // 取第一列作为 URL
-        let url = '';
-        for (let i = 0; i < row.length; i++) {
-          const val = (row[i] || '').trim();
-          if (val) { url = val; break; }
-        }
+    const rows = results.data;
+    parsedUrls = [];
+    let validCount = 0;
+    let invalidCount = 0;
 
-        if (!url || !isValidUrl(url)) {
-          invalidCount++;
-          return;
-        }
+    urlPreviewBody.innerHTML = '';
 
-        parsedUrls.push({ originalIndex: idx, url });
-        validCount++;
+    // 兼容不同编码：UTF-8 列名和 GBK 列名同时支持
+    const colUrl = '原URL' in rows[0] ? '原URL'
+                : '\u539F\u0055\u0052\u004C' in rows[0] ? '\u539F\u0055\u0052\u004C'  // GBK乱码的"原URL"
+                : null;
+    const colDomain = 'URL对应域名' in rows[0] ? 'URL对应域名'
+                : null;
 
-        // 预览前5条
-        if (idx < 5) {
-          const tr = document.createElement('tr');
-          tr.innerHTML = `<td>${idx + 1}</td><td>${escapeHtml(url)}</td>`;
-          urlPreviewBody.appendChild(tr);
-        }
-      });
+    if (rows.length === 0 || !colUrl) {
+      alert('CSV 文件缺少"原URL"列，请确认文件格式正确。\n\n标准格式应为：\n页面AS, 原URL, URL对应域名, 目标域名, 类型, 外部链接数量, 自动评论运行结果');
+      resetFile();
+      return;
+    }
 
-      urlPreview.classList.add('visible');
-      fileCount.textContent = `共 ${validCount} 条 URL`;
-      if (invalidCount > 0) {
-        fileCount.textContent += `（跳过 ${invalidCount} 条无效）`;
+    rows.forEach((row, idx) => {
+      let url = (row[colUrl] || '').trim();
+      let sourceDomain = colDomain ? (row[colDomain] || '').trim() : '';
+
+      if (!url) {
+        invalidCount++;
+        return;
       }
 
-      updateCostHint(validCount);
-      startBtn.disabled = false;
-    },
-    error: (err) => {
-      alert('CSV 解析失败：' + err.message);
-      resetFile();
+      // 补全协议头，确保 URL 可用
+      if (!/^https?:\/\//i.test(url)) {
+        url = 'https://' + url;
+      }
+
+      if (!isValidUrl(url)) {
+        invalidCount++;
+        return;
+      }
+
+      parsedUrls.push({
+        originalIndex: idx,
+        url,
+        sourceDomain
+      });
+      validCount++;
+
+      // 预览前5条
+      if (idx < 5) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${idx + 1}</td><td>${escapeHtml(sourceDomain || url)}</td><td>${escapeHtml(url)}</td>`;
+        urlPreviewBody.appendChild(tr);
+      }
+    });
+
+    urlPreview.classList.add('visible');
+    fileCount.textContent = `共 ${validCount} 条 URL`;
+    if (invalidCount > 0) {
+      fileCount.textContent += `（跳过 ${invalidCount} 条无效）`;
     }
+
+    updateCostHint(validCount);
+    startBtn.disabled = validCount === 0;
+  }).catch((err) => {
+    alert('CSV 读取失败：' + err.message);
+    resetFile();
   });
 }
 
@@ -233,8 +300,8 @@ function updateCostHint(count) {
 // ==================== 用户信息 ====================
 async function loadUserId() {
   return new Promise((resolve) => {
-    chrome.storage.sync.get(['userId'], (data) => {
-      userId = data.userId || '';
+    chrome.storage.sync.get(['auto_comment_user_id'], (data) => {
+      userId = data.auto_comment_user_id || '';
       resolve();
     });
   });
@@ -255,6 +322,27 @@ async function loadPoints() {
     }
   } catch (e) {
     pointsBalance.textContent = '—';
+  }
+}
+
+async function loadTimeoutSetting() {
+  return new Promise((resolve) => {
+    chrome.storage.sync.get([TIMEOUT_STORAGE_KEY], (data) => {
+      const saved = parseInt(data[TIMEOUT_STORAGE_KEY], 10);
+      timeoutSeconds = (saved && saved >= 10 && saved <= 600) ? saved : 60;
+      timeoutInput.value = String(timeoutSeconds);
+      resolve();
+    });
+  });
+}
+
+function saveTimeoutSetting() {
+  const val = parseInt(timeoutInput.value, 10);
+  if (val >= 10 && val <= 600) {
+    timeoutSeconds = val;
+    chrome.storage.sync.set({ [TIMEOUT_STORAGE_KEY]: val });
+  } else {
+    timeoutInput.value = String(timeoutSeconds);
   }
 }
 
@@ -317,16 +405,65 @@ function scheduleNext() {
   if (status !== 'running') return;
   if (pollTimer) clearTimeout(pollTimer);
   pollTimer = setTimeout(pollAndProcess, POLL_INTERVAL);
+  // 同时启动超时检测定时器
+  startTimeoutChecker();
+}
+
+function startTimeoutChecker() {
+  if (timeoutCheckTimer) return;
+  timeoutCheckTimer = setInterval(() => {
+    if (status !== 'running') {
+      stopTimeoutChecker();
+      return;
+    }
+    checkTimeouts();
+  }, TIMEOUT_CHECK_INTERVAL);
+}
+
+function stopTimeoutChecker() {
+  if (timeoutCheckTimer) {
+    clearInterval(timeoutCheckTimer);
+    timeoutCheckTimer = null;
+  }
+}
+
+async function checkTimeouts() {
+  if (activeTabs.size === 0) {
+    stopTimeoutChecker();
+    return;
+  }
+  const now = Date.now();
+  const toRemove = [];
+  for (const [tabId, info] of activeTabs) {
+    const elapsed = (now - info.startTime) / 1000;
+    if (elapsed > timeoutSeconds) {
+      toRemove.push({ tabId, urlId: info.urlId, url: info.url });
+    }
+  }
+  for (const { tabId, urlId, url } of toRemove) {
+    activeTabs.delete(tabId);
+    addLog(url, 'fail', `处理超时（>${timeoutSeconds}秒），自动关闭`);
+    updateCount('fail');
+    reportTabClosedFallback(urlId, url);
+    try {
+      await new Promise((resolve) => {
+        chrome.tabs.remove(tabId, () => resolve());
+      });
+    } catch (_) {}
+  }
 }
 
 async function pollAndProcess() {
   if (status !== 'running') return;
+  if (isPolling) return;
+  isPolling = true;
 
   // 先尝试上报pending结果
   await flushPendingReports();
 
   if (activeTabCount >= MAX_CONCURRENT_TABS) {
-    // 标签页已满，等待完成
+    // 标签页已满，等待完成（标签关闭时 onRemoved 会调用 scheduleNext）
+    isPolling = false;
     scheduleNext();
     return;
   }
@@ -339,18 +476,32 @@ async function pollAndProcess() {
     if (json.data === null) {
       // 全部处理完成
       onAllCompleted();
+      isPolling = false;
       return;
     }
 
     const { urlId, url, originalIndex } = json.data;
-    activeTabCount++;
-    updateStatsUI();
 
-    // 打开标签页
+    // 打开标签页（必须等到 create 回调执行后再 ++activeTabCount，避免标签页快速关闭导致计数错乱）
     chrome.tabs.create({ url, active: false }, (tab) => {
-      // 监听标签页关闭，以减少 activeTabCount
+      activeTabCount++;
+      // 记录标签页开启时间，用于超时检测
+      activeTabs.set(tab.id, { batchId, urlId, startTime: Date.now(), url });
+      // 启动超时检测定时器（若尚未启动）
+      startTimeoutChecker();
+      updateStatsUI();
+
+      // 监听标签页关闭，以减少 activeTabCount（只在未收到成功确认时触发兜底上报）
+      let alreadyConfirmed = false;
       const listener = (tabId, removeInfo) => {
         if (tabId === tab.id) {
+          const tabInfo = activeTabs.get(tab.id);
+          const pageUrl = tabInfo && tabInfo.url;
+          activeTabs.delete(tab.id);
+          // 仅当未收到成功确认时，才兜底上报失败（防止重复上报）
+          if (!alreadyConfirmed) {
+            reportTabClosedFallback(urlId, pageUrl);
+          }
           activeTabCount = Math.max(0, activeTabCount - 1);
           updateStatsUI();
           chrome.tabs.onRemoved.removeListener(listener);
@@ -359,7 +510,7 @@ async function pollAndProcess() {
       };
       chrome.tabs.onRemoved.addListener(listener);
 
-      // 向标签页发送 batch 任务信息
+      // 向标签页发送 batch 任务信息，等待执行结果再关闭标签页
       setTimeout(() => {
         chrome.tabs.sendMessage(tab.id, {
           type: 'BATCH_HANDLE',
@@ -367,30 +518,31 @@ async function pollAndProcess() {
           urlId,
           url,
           originalIndex
+        }).then((response) => {
+          if (response && response.ok) {
+            // 收到成功确认，主动关闭标签页
+            alreadyConfirmed = true;
+            chrome.tabs.remove(tab.id, () => {});
+          }
         }).catch(() => {});
       }, 1000);
     });
   } catch (e) {
     console.error('[batch] pollAndProcess 错误:', e);
+    isPolling = false;
     scheduleNext();
     return;
   }
 
-  // 限制并发，调度下一个
-  if (processTimer) clearTimeout(processTimer);
-  processTimer = setTimeout(() => {
-    if (activeTabCount < MAX_CONCURRENT_TABS) {
-      pollAndProcess();
-    } else {
-      scheduleNext();
-    }
-  }, PROCESS_DELAY);
+  // 本次轮询结束，释放锁。标签关闭时会触发 scheduleNext → 下一次 pollAndProcess
+  isPolling = false;
 }
 
 function togglePause() {
   if (status === 'running') {
     setStatus('paused');
     if (pollTimer) clearTimeout(pollTimer);
+    stopTimeoutChecker();
   } else if (status === 'paused') {
     setStatus('running');
     scheduleNext();
@@ -400,13 +552,68 @@ function togglePause() {
 async function stopBatch() {
   setStatus('idle');
   if (pollTimer) clearTimeout(pollTimer);
-  if (processTimer) clearTimeout(processTimer);
+  stopTimeoutChecker();
+  // 关闭所有仍在记录中的标签页
+  const tabIds = Array.from(activeTabs.keys());
+  activeTabs.clear();
+  for (const tabId of tabIds) {
+    try {
+      await new Promise((resolve) => {
+        chrome.tabs.remove(tabId, () => resolve());
+      });
+    } catch (_) {}
+  }
   activeTabCount = 0;
   clearSession();
   updateUI();
 }
 
 // ==================== 结果上报 ====================
+/** 标签关闭时兜底上报失败：避免「未写入服务端」时 next-url 反复返回同一条 */
+async function reportTabClosedFallback(urlId, pageUrl) {
+  if (!batchId || urlId == null) return;
+
+  const data = await new Promise((resolve) => {
+    chrome.storage.local.get(['batchResults', 'batchReportedUrls'], (d) => resolve(d));
+  });
+
+  const reported = data.batchReportedUrls || [];
+  const urlKey = `${batchId}:${urlId}`;
+  if (reported.includes(urlKey)) return;
+
+  // 写入 batchResults，使 batch.js 轮询立即感知到失败（url 供日志展示）
+  const results = data.batchResults || [];
+  results.push({
+    batchId,
+    urlId,
+    url: pageUrl || '',
+    result: 'fail',
+    aiContent: null,
+    errorMessage: '标签页已关闭（超时或用户主动关闭）',
+    timestamp: Date.now()
+  });
+  if (results.length > 100) results.shift();
+
+  reported.push(urlKey);
+  if (reported.length > 500) reported.shift();
+
+  await new Promise((resolve) => {
+    chrome.storage.local.set({ batchResults: results, batchReportedUrls: reported }, resolve);
+  });
+
+  // 同时发给后端（异步，不阻塞）
+  fetch(`${API_BASE}/batch/${encodeURIComponent(batchId)}/report`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      urlId,
+      result: 'fail',
+      aiContent: null,
+      errorMessage: '标签页已关闭（超时或用户主动关闭）'
+    })
+  }).catch(() => {});
+}
+
 async function reportResult(urlId, result, aiContent, errorMessage) {
   if (!batchId) return;
 
@@ -484,6 +691,8 @@ function addLog(url, result, message) {
 function onAllCompleted() {
   setStatus('completed');
   addLog('系统', 'info', '所有 URL 已处理完毕');
+  stopTimeoutChecker();
+  activeTabs.clear();
   clearSession();
 }
 
@@ -553,7 +762,25 @@ function updateCount(result) {
 // ==================== 导出 & 清空 ====================
 async function exportCsv() {
   if (!batchId) return;
-  window.open(`${API_BASE}/batch/${batchId}/export`, '_blank');
+  try {
+    const resp = await fetch(`${API_BASE}/batch/${batchId}/export`);
+    if (!resp.ok) {
+      const errData = await resp.json().catch(() => ({}));
+      alert('导出失败：' + (errData.message || `HTTP ${resp.status}`));
+      return;
+    }
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `batch_result_${batchId}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    alert('导出失败：' + e.message);
+  }
 }
 
 function clearBatch() {

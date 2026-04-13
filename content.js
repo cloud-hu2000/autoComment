@@ -1586,6 +1586,32 @@
     return await performClick(button);
   }
 
+  /**
+   * 等待页面导航发生（页面刷新/跳转/隐藏时立即 resolve；超时则 resolve）
+   * 用于：点击提交按钮后等待页面响应，以确认是否成功触发表单提交
+   */
+  async function waitForNavigate(timeoutMs = 8000) {
+    return new Promise((resolve) => {
+      let resolved = false;
+      function finish(result) {
+        if (resolved) return;
+        resolved = true;
+        cleanup();
+        resolve(result);
+      }
+      function cleanup() {
+        clearTimeout(timer);
+        window.removeEventListener('beforeunload', onBeforeUnload);
+        window.removeEventListener('pagehide', onPageHide);
+      }
+      function onBeforeUnload() { finish('navigating'); }
+      function onPageHide(e) { finish(e.persisted ? 'pagehide-persisted' : 'pagehide'); }
+      const timer = setTimeout(() => finish('timeout'), timeoutMs);
+      window.addEventListener('beforeunload', onBeforeUnload);
+      window.addEventListener('pagehide', onPageHide);
+    });
+  }
+
   // 执行点击操作
   async function performClick(button) {
     console.log('[AutoComment] 找到提交按钮:', {
@@ -1686,6 +1712,7 @@
         recordFormSubmit();
 
         console.log('[AutoComment] 提交按钮点击成功 (pointer/mousedown→mouseup→click)');
+        await waitForNavigate(8000);
         return { success: true, button: button };
       } catch (e) {
         console.log('[AutoComment] 合成事件失败，尝试 button.click():', e.message);
@@ -1693,6 +1720,7 @@
           button.click();
           recordFormSubmit();
           console.log('[AutoComment] button.click() 点击成功');
+          await waitForNavigate(8000);
           return { success: true, button: button };
         } catch (e2) {
           console.log('[AutoComment] button.click() 也失败:', e2.message);
@@ -1701,6 +1729,7 @@
           if (tryRequestSubmit(formEl, button)) {
             recordFormSubmit();
             console.log('[AutoComment] form.requestSubmit(submitter) 成功');
+            await waitForNavigate(8000);
             return { success: true, button: button };
           }
           try {
@@ -1708,6 +1737,7 @@
               console.log('[AutoComment] 降级 form.submit()（无 submit 事件）');
               formEl.submit();
               recordFormSubmit();
+              await waitForNavigate(8000);
               return { success: true, button: button };
             }
           } catch (e3) {
@@ -1729,6 +1759,7 @@
         button.dispatchEvent(event);
         recordFormSubmit();
         console.log('[AutoComment] 使用 dispatchEvent 点击成功');
+        await waitForNavigate(8000);
         return { success: true, button: button };
       } catch (e2) {
         console.log('[AutoComment] dispatchEvent 点击也失败:', e2.message);
@@ -1737,6 +1768,7 @@
         if (tryRequestSubmit(formEl, button)) {
           recordFormSubmit();
           console.log('[AutoComment] form.requestSubmit(submitter) 成功');
+          await waitForNavigate(8000);
           return { success: true, button: button };
         }
         try {
@@ -1744,6 +1776,7 @@
             console.log('[AutoComment] 尝试 form.submit()');
             formEl.submit();
             recordFormSubmit();
+            await waitForNavigate(8000);
             return { success: true, button: button };
           }
         } catch (e3) {
@@ -1776,9 +1809,15 @@
 
     // 如果文本框已有内容，可以选择覆盖或跳过
     const currentValue = (targetTextarea.value || '').trim();
-    if (currentValue && currentValue.length > 10) {
-      console.log('[AutoComment] 文本框已有内容，跳过自动填充');
+    // 如果当前文本与缓存文案相同，说明已填充过，直接跳过
+    if (currentValue === promotionText) {
+      console.log('[AutoComment] 文本框内容已与缓存文案一致，跳过');
       return false;
+    }
+    // 如果文本框有内容但与缓存文案不同（可能是页面刷新后回填了旧评论内容），
+    // 则用缓存文案覆盖
+    if (currentValue && currentValue !== promotionText) {
+      console.log('[AutoComment] 文本框内容与缓存文案不一致，将用缓存覆盖旧内容');
     }
 
     setValueRobust(targetTextarea, promotionText);
@@ -2494,7 +2533,11 @@
                 href.startsWith('#')) {
               return null;
             }
-            if (isSameSite(url.hostname)) {
+            // 过滤协议和同站链接
+            const currentHost = window.location.hostname;
+            const currentDomain = currentHost.replace(/^www\./, '');
+            const linkDomain = url.hostname.replace(/^www\./, '');
+            if (linkDomain === currentDomain) {
               return null;
             }
             const rel = (link.rel || '').toLowerCase();
@@ -2697,9 +2740,12 @@
       if (message && message.type === 'TOGGLE_PROMOTE_PANEL') {
         createOrToggleQwenPanel();
       }
-      // 批量处理模式：收到任务后自动执行评论流程
+      // 批量处理模式：收到任务后自动执行评论流程（改为 async，等待执行结果再响应）
       if (message && message.type === 'BATCH_HANDLE') {
-        handleBatchTask(message.batchId, message.urlId, message.url, message.originalIndex);
+        handleBatchTask(message.batchId, message.urlId, message.url, message.originalIndex)
+          .then(() => _sendResponse({ ok: true }))
+          .catch((err) => _sendResponse({ ok: false, error: String(err) }));
+        return true; // 异步响应
       }
     });
   }
@@ -2708,23 +2754,46 @@
   /**
    * 批量模式：自动完成评论流程并上报结果
    */
-  function handleBatchTask(batchId, urlId, url, originalIndex) {
-    // 等待页面加载完成
-    waitForPageReady()
-      .then(() => autoFillCommentForm())
-      .then(() => generateAndFillContent())
-      .then((aiContent) => {
-        // 自动提交评论
-        return submitCommentForm().then(() => aiContent);
-      })
-      .then((aiContent) => {
-        // 上报成功
-        reportBatchResult(batchId, urlId, 'success', aiContent, null);
-      })
-      .catch((err) => {
-        // 上报失败
-        reportBatchResult(batchId, urlId, 'fail', null, err.message || String(err));
-      });
+  async function handleBatchTask(batchId, urlId, url, originalIndex) {
+    try {
+      await waitForPageReady();
+      const aiContent = await generatePromotionCopyWithQwen();
+      const fillResult = await ensureAllCommentFormFieldsFilled(aiContent);
+      if (!fillResult.success) {
+        throw new Error('表单字段缺失: ' + (fillResult.missingFields || []).join(', '));
+      }
+
+      // 提交前先写入 pending 结果（页面刷新后 batch.js 仍能立即读到）
+      await writePendingResult(batchId, urlId, url, 'success', aiContent, null);
+      // 用 sendBeacon 异步发后台，sendBeacon 在页面卸载前一定会发出
+      sendBeaconReport(batchId, urlId, 'success', aiContent, null);
+
+      const clickResult = await clickCommentSubmitButton();
+      // performClick 已等待页面跳转/隐藏（最多8秒），此时 content script 上下文仍存活
+      // 若 timeout 说明页面未响应，算失败；否则表单已提交，记录成功
+      if (!clickResult.success) {
+        throw new Error(clickResult.error || '提交按钮点击失败');
+      }
+
+      // 页面点击成功后，通知 background 再次落盘（防止刷新导致 context 丢失）
+      // 这是关键：即使页面刷新，background 仍持有 batchId，能正确上报
+      // 同时等待 background 响应后再返回，使 batch.js 能收到确认再关闭标签页
+      if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+        await new Promise((resolve) => {
+          chrome.runtime.sendMessage({
+            type: 'BATCH_HANDLE_CONFIRM',
+            batchId,
+            urlId,
+            url: url || '',
+            aiContent
+          }).then(resolve).catch(resolve); // 即使发送失败也不阻断
+        });
+      }
+    } catch (err) {
+      await writePendingResult(batchId, urlId, url, 'fail', null, err.message || String(err));
+      await reportBatchResult(batchId, urlId, 'fail', null, err.message || String(err), url);
+      try { window.close(); } catch (_) {}
+    }
   }
 
   /**
@@ -2754,32 +2823,112 @@
   }
 
   /**
-   * 上报批量任务结果到后端
+   * 将待确认结果写入 storage（页面刷新前同步落盘，batch.js 轮询可立即读到）
    */
-  async function reportBatchResult(batchId, urlId, result, aiContent, errorMessage) {
-    const apiBase = 'https://jieyunsang.cn/api';
-
-    // 先从存储中获取 userId
-    const userId = await new Promise((resolve) => {
-      if (typeof chrome !== 'undefined' && chrome.storage) {
-        chrome.storage.sync.get(['userId'], (data) => resolve(data.userId || ''));
-      } else {
-        resolve('');
-      }
-    });
-
-    // 通过 fetch 上报（绕过 content script 的 CORS 限制，使用 navigate 方式）
-    // 由于 content script 无法直接调用 API，使用以下方式：
-    // 1. 通过 chrome.runtime.sendMessage 转发给 background
-    if (typeof chrome !== 'undefined' && chrome.runtime) {
-      chrome.runtime.sendMessage({
-        type: 'BATCH_REPORT_RESULT',
+  async function writePendingResult(batchId, urlId, url, result, aiContent, errorMessage) {
+    if (typeof chrome === 'undefined' || !chrome.storage) return;
+    try {
+      const data = await new Promise((resolve) => {
+        chrome.storage.local.get(['batchResults', 'batchReportedUrls'], (d) => resolve(d));
+      });
+      const results = data.batchResults || [];
+      results.push({
         batchId,
         urlId,
+        url: url || '',
         result,
         aiContent,
-        errorMessage
+        errorMessage,
+        timestamp: Date.now()
       });
+      if (results.length > 100) results.shift();
+      const reported = data.batchReportedUrls || [];
+      const urlKey = `${batchId}:${urlId}`;
+      if (!reported.includes(urlKey)) {
+        reported.push(urlKey);
+        if (reported.length > 500) reported.shift();
+      }
+      await new Promise((resolve) => {
+        chrome.storage.local.set({ batchResults: results, batchReportedUrls: reported }, resolve);
+      });
+    } catch (_) {}
+  }
+
+  /**
+   * 用 navigator.sendBeacon 发后台（不受页面刷新影响，在 beforeunload 之前一定发出）
+   */
+  function sendBeaconReport(batchId, urlId, result, aiContent, errorMessage) {
+    const payload = JSON.stringify({ urlId, result, aiContent, errorMessage });
+    const url = `https://jieyunsang.cn/api/batch/${encodeURIComponent(batchId)}/report`;
+    try {
+      if (navigator.sendBeacon) {
+        const sent = navigator.sendBeacon(url, payload);
+        console.log('[AutoComment] sendBeacon →', sent ? '已入队' : '同步失败');
+      }
+    } catch (e) {
+      console.warn('[AutoComment] sendBeacon 失败:', e);
+    }
+  }
+  async function reportBatchResult(batchId, urlId, result, aiContent, errorMessage, pageUrl) {
+    const payload = {
+      type: 'BATCH_REPORT_RESULT',
+      batchId,
+      urlId,
+      url: pageUrl || '',
+      result,
+      aiContent,
+      errorMessage
+    };
+
+    // 主路径：background 先落盘 storage 再 sendResponse；页面跳转/关页前必须 await，否则 batch 收不到成功
+    if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+      try {
+        await new Promise((resolve, reject) => {
+          chrome.runtime.sendMessage(payload, (response) => {
+            if (chrome.runtime.lastError) {
+              reject(new Error(chrome.runtime.lastError.message));
+              return;
+            }
+            if (response && response.ok) {
+              resolve(response);
+            } else {
+              reject(new Error((response && response.error) || 'background 上报失败'));
+            }
+          });
+        });
+        return;
+      } catch (e) {
+        console.warn('[AutoComment] sendMessage 上报失败，尝试本地写入 storage:', e);
+      }
+    }
+
+    // 兜底：extension 上下文异常时仍尽量写入本地，供 batch 页轮询
+    if (typeof chrome !== 'undefined' && chrome.storage) {
+      try {
+        const data = await new Promise((resolve) => {
+          chrome.storage.local.get(['batchResults', 'batchReportedUrls'], (d) => resolve(d));
+        });
+        const results = data.batchResults || [];
+        results.push({
+          batchId,
+          urlId,
+          url: pageUrl || '',
+          result,
+          aiContent,
+          errorMessage,
+          timestamp: Date.now()
+        });
+        if (results.length > 100) results.shift();
+        const reported = data.batchReportedUrls || [];
+        const urlKey = `${batchId}:${urlId}`;
+        if (!reported.includes(urlKey)) {
+          reported.push(urlKey);
+          if (reported.length > 500) reported.shift();
+        }
+        await new Promise((resolve) => {
+          chrome.storage.local.set({ batchResults: results, batchReportedUrls: reported }, resolve);
+        });
+      } catch (_) {}
     }
   }
 })();

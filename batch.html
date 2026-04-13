@@ -429,7 +429,8 @@
             <thead>
               <tr>
                 <th style="width:50px">#</th>
-                <th>URL</th>
+                <th>来源域名</th>
+                <th>目标页面</th>
               </tr>
             </thead>
             <tbody id="urlPreviewBody"></tbody>
@@ -437,7 +438,25 @@
         </div>
 
         <div class="hint" style="margin-top:10px">
-          CSV 文件应包含 URL 列，支持任意列名。首行会被视为表头自动跳过。
+          CSV 文件需包含"原URL"列，标准格式为：<br/>
+          页面AS, 原URL, URL对应域名, 目标域名, 类型, 外部链接数量, 自动评论运行结果
+        </div>
+      </div>
+
+      <!-- 超时配置 -->
+      <div class="card">
+        <div class="card-title">超时配置</div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <label for="timeoutInput" style="font-size:13px;font-weight:500;color:#374151;white-space:nowrap;margin:0;">单页处理超时时间（秒）：</label>
+          <input
+            type="number"
+            id="timeoutInput"
+            min="10"
+            max="600"
+            value="60"
+            style="width:80px;padding:7px 10px;border-radius:8px;border:1px solid #d1d5db;font-size:13px;outline:none;"
+          />
+          <span style="font-size:12px;color:#9ca3af;">范围 10~600 秒</span>
         </div>
       </div>
 
