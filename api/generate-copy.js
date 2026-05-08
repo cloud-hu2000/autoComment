@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 
-const { queryOne, exec } = require('./storage');
+const { queryOne, exec, upsert } = require('./db');
 
 const POINTS_COST_PER_GENERATION = 1;
 
@@ -15,33 +15,32 @@ router.post('/generate-copy', async (req, res) => {
   const { userId, websiteUrl, title, description, bodyText, skillTemplate } = req.body || {};
 
   if (!userId) {
-    res.status(400).json({ error: '缺少 userId 参数' });
-    return;
+    return res.status(400).json({ error: '缺少 userId 参数' });
   }
 
   try {
     // 1. 查询当前积分
-    const row = queryOne`SELECT points FROM auto_comment_users WHERE user_id = ${userId}`;
+    const row = await queryOne`SELECT points FROM auto_comment_users WHERE user_id = ${userId}`;
     const currentPoints = row ? row.points : 0;
 
     if (currentPoints < POINTS_COST_PER_GENERATION) {
-      res.status(200).json({
+      return res.status(200).json({
         success: false,
         error: '积分不足',
         currentPoints,
         requiredPoints: POINTS_COST_PER_GENERATION
       });
-      return;
     }
 
     const newPoints = currentPoints - POINTS_COST_PER_GENERATION;
 
-    // 2. 扣减积分（UPSERT）
-    if (row) {
-      exec`UPDATE auto_comment_users SET points = ${newPoints}, updated_at = datetime('now') WHERE user_id = ${userId}`;
-    } else {
-      exec`INSERT INTO auto_comment_users (user_id, points, updated_at) VALUES (${userId}, ${newPoints}, datetime('now'))`;
-    }
+    // 2. 扣减积分（UPSERT，MySQL 用 ON DUPLICATE KEY UPDATE）
+    await upsert(
+      'auto_comment_users',
+      ['user_id', 'points', 'updated_at'],
+      [userId, newPoints, new Date().toISOString().slice(0, 19).replace('T', ' ')],
+      'user_id'
+    );
 
     // 3. 构造发送给通义千问的内容
     const DEFAULT_SKILL_TEMPLATE = [

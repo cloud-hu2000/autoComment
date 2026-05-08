@@ -252,13 +252,12 @@ const QWEN_API_BASE = 'http://你的服务器IP/api';
 ### 8.1 安装 MySQL
 
 ```bash
-# Ubuntu/Debian
-apt update
-apt install -y mysql-server
+# CentOS/RHEL/Fedora（dnf）
+dnf install -y mysql-server mysql
 
 # 启动并设置开机自启
-systemctl start mysql
-systemctl enable mysql
+systemctl start mysqld
+systemctl enable mysqld
 
 # 安全初始化（设置 root 密码，移除匿名用户等）
 mysql_secure_installation
@@ -323,14 +322,17 @@ pm2 restart auto-comment-api
 如果需要从其他机器连接 MySQL：
 
 ```bash
-# 编辑 MySQL 配置文件
-nano /etc/mysql/mysql.conf.d/mysqld.cnf
+# 编辑 MySQL 配置文件（CentOS/RHEL 路径）
+nano /etc/my.cnf.d/mysql.server.cnf
+
+# 或者
+nano /etc/my.cnf
 
 # 将 bind-address 改为 0.0.0.0（允许所有 IP 连接，不推荐生产环境）
 bind-address = 0.0.0.0
 
 # 重启 MySQL
-systemctl restart mysql
+systemctl restart mysqld
 
 # 授权远程用户
 mysql -u root -p
@@ -348,7 +350,7 @@ FLUSH PRIVILEGES;
 
 ```bash
 # 查看 MySQL 状态
-systemctl status mysql
+systemctl status mysqld
 
 # 登录 MySQL
 mysql -u root -p

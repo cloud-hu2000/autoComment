@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 
-const { queryOne } = require('./storage');
+const { queryOne } = require('./db');
 
 /**
  * 查询用户积分

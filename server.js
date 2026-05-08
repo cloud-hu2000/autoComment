@@ -6,6 +6,9 @@ const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// 统一数据库入口（根据 DATABASE_TYPE=sqlite|mysql 自动选择适配器）
+require('./api/db');
+
 // 解析 JSON 请求体
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
