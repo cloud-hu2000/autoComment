@@ -286,6 +286,9 @@
       .stat-fail .num { color: #dc2626; }
       .stat-pending .num { color: #2563eb; }
 
+      /* 处理过程中成功/失败数尚未确定时淡化显示 */
+      .stat-item.inactive { opacity: 0.35; }
+
       /* 实时日志 */
       .log-section {
         display: none;
@@ -493,10 +496,10 @@
           <div class="progress-bar" id="progressBar"></div>
         </div>
         <div class="progress-stats">
-          <div class="stat-item stat-success">
+          <div class="stat-item stat-success inactive">
             <span class="num" id="successCount">0</span> 成功
           </div>
-          <div class="stat-item stat-fail">
+          <div class="stat-item stat-fail inactive">
             <span class="num" id="failCount">0</span> 失败
           </div>
           <div class="stat-item stat-pending">

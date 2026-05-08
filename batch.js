@@ -18,9 +18,9 @@ let pendingReports = [];             // 待上报结果（本地队列）
 
 // 实时计数
 let totalCount = 0;
-let successCount = 0;
-let failCount = 0;
 let pendingCount = 0;
+// 初始积分（用于结束后通过积分差值计算成功/失败数）
+let initialPoints = 0;
 
 // 轮询定时器
 let pollTimer = null;
@@ -93,21 +93,14 @@ function startResultPolling() {
     const newResults = results.filter((r) => r.batchId === batchId);
 
     if (newResults.length > lastResultCount) {
-      // 有新结果，更新UI
-      for (let i = lastResultCount; i < newResults.length; i++) {
-        const r = newResults[i];
-        addLog(
-          r.url || String(r.urlId),
-          r.result,
-          r.errorMessage || (r.result === 'success' ? '评论成功' : '评论失败')
-        );
-        updateCount(r.result);
-      }
       lastResultCount = newResults.length;
 
+      // 只更新待处理计数（不记录日志，不区分成功/失败）
+      pendingCount = Math.max(0, totalCount - newResults.length);
+      updateStatsUI();
+
       // 检查是否全部完成
-      const processed = successCount + failCount;
-      if (processed >= totalCount && totalCount > 0) {
+      if (newResults.length >= totalCount && totalCount > 0) {
         onAllCompleted();
       }
     }
@@ -357,11 +350,12 @@ async function startBatch() {
     return;
   }
 
+  // 记录初始积分
+  initialPoints = parseInt(pointsBalance.textContent || '0', 10);
+
   // 生成 batchId
   batchId = generateUUID();
   totalCount = parsedUrls.length;
-  successCount = 0;
-  failCount = 0;
   pendingCount = totalCount;
 
   // 提交到后端
@@ -442,8 +436,6 @@ async function checkTimeouts() {
   }
   for (const { tabId, urlId, url } of toRemove) {
     activeTabs.delete(tabId);
-    addLog(url, 'fail', `处理超时（>${timeoutSeconds}秒），自动关闭`);
-    updateCount('fail');
     reportTabClosedFallback(urlId, url);
     try {
       await new Promise((resolve) => {
@@ -496,11 +488,10 @@ async function pollAndProcess() {
       const listener = (tabId, removeInfo) => {
         if (tabId === tab.id) {
           const tabInfo = activeTabs.get(tab.id);
-          const pageUrl = tabInfo && tabInfo.url;
           activeTabs.delete(tab.id);
           // 仅当未收到成功确认时，才兜底上报失败（防止重复上报）
           if (!alreadyConfirmed) {
-            reportTabClosedFallback(urlId, pageUrl);
+            reportTabClosedFallback(urlId, tabInfo && tabInfo.url);
           }
           activeTabCount = Math.max(0, activeTabCount - 1);
           updateStatsUI();
@@ -510,7 +501,7 @@ async function pollAndProcess() {
       };
       chrome.tabs.onRemoved.addListener(listener);
 
-      // 向标签页发送 batch 任务信息，等待执行结果再关闭标签页
+      // 向标签页发送 batch 任务信息
       setTimeout(() => {
         chrome.tabs.sendMessage(tab.id, {
           type: 'BATCH_HANDLE',
@@ -520,7 +511,6 @@ async function pollAndProcess() {
           originalIndex
         }).then((response) => {
           if (response && response.ok) {
-            // 收到成功确认，主动关闭标签页
             alreadyConfirmed = true;
             chrome.tabs.remove(tab.id, () => {});
           }
@@ -688,12 +678,35 @@ function addLog(url, result, message) {
   }
 }
 
-function onAllCompleted() {
+async function onAllCompleted() {
   setStatus('completed');
-  addLog('系统', 'info', '所有 URL 已处理完毕');
   stopTimeoutChecker();
   activeTabs.clear();
   clearSession();
+
+  // 通过积分差值计算成功/失败数
+  let finalPoints = initialPoints;
+  try {
+    const resp = await fetch(`${API_BASE}/get-points?userId=${encodeURIComponent(userId)}`);
+    const json = await resp.json();
+    if (json.success && json.points !== undefined) {
+      finalPoints = json.points;
+    }
+  } catch (_) {}
+
+  const pointsUsed = initialPoints - finalPoints;
+  const successCount = pointsUsed > 0 ? pointsUsed : 0;
+  const failCount = totalCount - successCount;
+
+  // 更新 UI
+  document.querySelector('.stat-success').classList.remove('inactive');
+  document.querySelector('.stat-fail').classList.remove('inactive');
+  document.getElementById('successCount').textContent = successCount;
+  document.getElementById('failCount').textContent = failCount;
+  document.getElementById('pendingCount').textContent = '0';
+  document.getElementById('progressText').textContent = `${totalCount}/${totalCount}`;
+
+  addLog('系统', 'success', `处理完毕：${successCount} 成功，${failCount} 失败（积分：${initialPoints} → ${finalPoints}，消耗 ${pointsUsed}）`);
 }
 
 // ==================== UI 更新 ====================
@@ -738,25 +751,13 @@ function updateUI() {
 }
 
 function updateStatsUI() {
-  const processed = successCount + failCount;
-  const pct = totalCount > 0 ? Math.round((processed / totalCount) * 100) : 0;
+  const pct = totalCount > 0 ? Math.round(((totalCount - pendingCount) / totalCount) * 100) : 0;
 
   progressBar.style.width = pct + '%';
-  successCountEl.textContent = successCount;
-  failCountEl.textContent = failCount;
+  successCountEl.textContent = '0';
+  failCountEl.textContent = '0';
   pendingCountEl.textContent = pendingCount;
-  progressText.textContent = `${processed}/${totalCount}`;
-}
-
-function updateCount(result) {
-  if (result === 'success') {
-    successCount++;
-    pendingCount = Math.max(0, pendingCount - 1);
-  } else {
-    failCount++;
-    pendingCount = Math.max(0, pendingCount - 1);
-  }
-  updateStatsUI();
+  progressText.textContent = `${totalCount - pendingCount}/${totalCount}`;
 }
 
 // ==================== 导出 & 清空 ====================
@@ -786,7 +787,7 @@ async function exportCsv() {
 function clearBatch() {
   resetFile();
   batchId = null;
-  totalCount = successCount = failCount = pendingCount = 0;
+  totalCount = pendingCount = 0;
   logList.innerHTML = '';
   setStatus('idle');
   updateUI();
@@ -796,7 +797,7 @@ function clearBatch() {
 // ==================== 会话持久化 ====================
 function saveSession() {
   chrome.storage.local.set({
-    batchSession: { batchId, totalCount, successCount, failCount }
+    batchSession: { batchId, totalCount }
   });
 }
 

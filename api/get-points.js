@@ -17,6 +17,7 @@ router.get('/get-points', (req, res) => {
 
   try {
     const row = queryOne`SELECT points FROM auto_comment_users WHERE user_id = ${userId}`;
+    console.log(`[get-points] userId=${userId}, row=${JSON.stringify(row)}, DB_PATH=${process.env.DB_PATH || 'default'}`);
     const points = row ? row.points : 0;
     res.status(200).json({ success: true, points });
   } catch (err) {

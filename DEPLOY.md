@@ -242,4 +242,129 @@ const QWEN_API_BASE = 'http://你的服务器IP/api';
 ```
 
 > 建议使用 HTTPS + 域名方式，Chrome 扩展对 HTTP 请求有一些限制。
-   
+
+---
+
+## 八、部署 MySQL 数据库（可选）
+
+如果需要使用自建 MySQL 替代 Neon PostgreSQL，请按以下步骤操作：
+
+### 8.1 安装 MySQL
+
+```bash
+# Ubuntu/Debian
+apt update
+apt install -y mysql-server
+
+# 启动并设置开机自启
+systemctl start mysql
+systemctl enable mysql
+
+# 安全初始化（设置 root 密码，移除匿名用户等）
+mysql_secure_installation
+```
+
+> **提示**：如果使用阿里云服务器，需在安全组中开放 **3306** 端口。
+
+### 8.2 创建数据库和用户
+
+```bash
+# 登录 MySQL
+mysql -u root -p
+```
+
+执行以下 SQL：
+
+```sql
+-- 创建数据库
+CREATE DATABASE IF NOT EXISTS autocomment CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- 创建用户并授权
+CREATE USER 'autocomment'@'localhost' IDENTIFIED BY '你的强密码';
+GRANT ALL PRIVILEGES ON autocomment.* TO 'autocomment'@'localhost';
+FLUSH PRIVILEGES;
+
+-- 退出
+EXIT;
+```
+
+### 8.3 验证连接
+
+```bash
+mysql -u autocomment -p -h localhost autocomment
+```
+
+### 8.4 修改 .env 文件
+
+编辑 `/var/www/auto-comment-api/.env`，将 `DATABASE_URL` 从 PostgreSQL 改为 MySQL：
+
+```env
+# MySQL 连接地址
+DATABASE_URL=mysql://autocomment:你的密码@localhost:3306/autocomment
+```
+
+> **注意**：如果代码中使用的是 Prisma 或其他 ORM，需要确保已安装 MySQL 驱动（如 `npm install mysql2`），并确认 schema.prisma 中的 `datasource db.provider` 已改为 `"mysql"`。
+
+### 8.5 运行数据库迁移
+
+```bash
+cd /var/www/auto-comment-api
+npx prisma migrate deploy
+```
+
+### 8.6 重启服务
+
+```bash
+pm2 restart auto-comment-api
+```
+
+### 8.7 远程连接配置（可选）
+
+如果需要从其他机器连接 MySQL：
+
+```bash
+# 编辑 MySQL 配置文件
+nano /etc/mysql/mysql.conf.d/mysqld.cnf
+
+# 将 bind-address 改为 0.0.0.0（允许所有 IP 连接，不推荐生产环境）
+bind-address = 0.0.0.0
+
+# 重启 MySQL
+systemctl restart mysql
+
+# 授权远程用户
+mysql -u root -p
+```
+
+```sql
+CREATE USER 'autocomment'@'%' IDENTIFIED BY '你的强密码';
+GRANT ALL PRIVILEGES ON autocomment.* TO 'autocomment'@'%';
+FLUSH PRIVILEGES;
+```
+
+> **安全建议**：生产环境建议使用阿里云数据库（RDS），不要直接暴露 MySQL 端口。
+
+### 8.8 常用 MySQL 维护命令
+
+```bash
+# 查看 MySQL 状态
+systemctl status mysql
+
+# 登录 MySQL
+mysql -u root -p
+
+# 查看数据库
+SHOW DATABASES;
+
+# 使用数据库
+USE autocomment;
+
+# 查看表
+SHOW TABLES;
+
+# 导出数据库
+mysqldump -u root -p autocomment > /tmp/autocomment.sql
+
+# 导入数据库
+mysql -u root -p autocomment < /tmp/autocomment.sql
+```

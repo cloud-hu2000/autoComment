@@ -57,7 +57,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message && message.type === 'BATCH_HANDLE_CONFIRM') {
     (async () => {
       try {
-        // 立即落盘，使 batch.js 轮询立即感知到结果
         await persistBatchReport({
           batchId: message.batchId,
           urlId: message.urlId,
@@ -68,7 +67,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         });
         sendResponse({ ok: true });
       } catch (e) {
-        console.error('[background] BATCH_HANDLE_CONFIRM', e);
         sendResponse({ ok: false, error: String(e) });
       }
     })();
@@ -84,7 +82,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         await persistBatchReport(message);
         sendResponse({ ok: true });
       } catch (e) {
-        console.error('[background] persistBatchReport', e);
         sendResponse({ ok: false, error: String(e) });
       }
     })();
