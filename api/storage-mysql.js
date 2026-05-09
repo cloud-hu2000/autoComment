@@ -1,8 +1,9 @@
 // MySQL 数据库存储
 const mysql = require('mysql2/promise');
 
+// 本地 MySQL 连接信息（默认写死，可通过环境变量覆盖）
 const DB_CONFIG = {
-  host: process.env.MYSQL_HOST || 'localhost',
+  host: process.env.MYSQL_HOST || '127.0.0.1',
   port: parseInt(process.env.MYSQL_PORT || '3306', 10),
   user: process.env.MYSQL_USER || 'root',
   password: process.env.MYSQL_PASSWORD || '',
