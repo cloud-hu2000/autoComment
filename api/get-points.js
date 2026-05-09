@@ -7,7 +7,7 @@ const { queryOne } = require('./db');
  * 查询用户积分
  * GET /api/get-points?userId=xxx
  */
-router.get('/get-points', (req, res) => {
+router.get('/get-points', async (req, res) => {
   const { userId } = req.query || {};
 
   if (!userId) {
@@ -16,7 +16,7 @@ router.get('/get-points', (req, res) => {
   }
 
   try {
-    const row = queryOne`SELECT points FROM auto_comment_users WHERE user_id = ${userId}`;
+    const row = await queryOne`SELECT points FROM auto_comment_users WHERE user_id = ${userId}`;
     console.log(`[get-points] userId=${userId}, row=${JSON.stringify(row)}, DB_PATH=${process.env.DB_PATH || 'default'}`);
     const points = row ? row.points : 0;
     res.status(200).json({ success: true, points });
