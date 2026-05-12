@@ -1,11 +1,11 @@
-// 批量外链评论自动化 - 扩展端核心逻辑
+// 批量外链评论自动化 - 扩展端核心逻辑（本地批次管理）
 
 // ==================== 配置 ====================
 const API_BASE = 'https://jieyunsang.cn/api';
-const MAX_CONCURRENT_TABS = 3;       // 最多同时打开3个标签页
-const POLL_INTERVAL = 3000;          // 轮询间隔（ms）
-const MAX_RETRY = 3;                 // 最大重试次数
-const TIMEOUT_CHECK_INTERVAL = 5000; // 超时检查间隔（ms）
+const CONCURRENT_TABS_STORAGE_KEY = 'batch_concurrent_tabs';
+const DEFAULT_CONCURRENT_TABS = 3;
+const POLL_INTERVAL = 3000;
+const TIMEOUT_CHECK_INTERVAL = 5000;
 const TIMEOUT_STORAGE_KEY = 'batch_timeout_seconds';
 
 // ==================== 状态 ====================
@@ -14,26 +14,31 @@ let userId = null;
 let parsedUrls = [];                // [{originalIndex, url}]
 let status = 'idle';                // idle | running | paused | completed
 let activeTabCount = 0;
-let pendingReports = [];             // 待上报结果（本地队列）
+let maxConcurrentTabs = DEFAULT_CONCURRENT_TABS;
+let currentIndex = 0;               // 当前处理到的索引（本地管理）
+let initialPoints = 0;
 
 // 实时计数
 let totalCount = 0;
+let successCount = 0;
+let failCount = 0;
 let pendingCount = 0;
-// 初始积分（用于结束后通过积分差值计算成功/失败数）
-let initialPoints = 0;
+
+// 本地结果存储
+let localResults = [];              // [{originalIndex, url, result, aiContent, errorMessage, timestamp}]
 
 // 轮询定时器
 let pollTimer = null;
-let processTimer = null;
 
-// 活跃标签页记录 { tabId -> { batchId, urlId, startTime } }
+// 活跃标签页记录 { tabId -> { urlIndex, startTime } }
 let activeTabs = new Map();
 
 // 定时器
 let timeoutCheckTimer = null;
-
-// 超时秒数（从 chrome.storage.sync 读取，默认 60）
 let timeoutSeconds = 60;
+
+// 标签打开锁（防止并发）
+let isOpeningTab = false;
 
 // ==================== DOM 引用 ====================
 const uploadZone = document.getElementById('uploadZone');
@@ -63,234 +68,20 @@ const pointsHint = document.getElementById('pointsHint');
 const costHint = document.getElementById('costHint');
 const statusBadge = document.getElementById('statusBadge');
 const timeoutInput = document.getElementById('timeoutInput');
+const concurrentInput = document.getElementById('concurrentInput');
 
 // ==================== 初始化 ====================
 document.addEventListener('DOMContentLoaded', init);
-
-let lastResultCount = 0;
-let isPolling = false;
 
 async function init() {
   await loadUserId();
   await loadPoints();
   await loadTimeoutSetting();
-  setupEventListeners();
-  restoreSession();
-  // 开始轮询 batchResults，更新进度
-  startResultPolling();
+  await loadConcurrentSetting();
+  bindEvents();
+  updateUI();
 }
 
-// 轮询 chrome.storage.local 中的批量结果
-function startResultPolling() {
-  setInterval(async () => {
-    if (!batchId || status !== 'running') return;
-
-    const data = await new Promise((resolve) => {
-      chrome.storage.local.get(['batchResults'], (d) => resolve(d));
-    });
-
-    const results = data.batchResults || [];
-    const newResults = results.filter((r) => r.batchId === batchId);
-
-    if (newResults.length > lastResultCount) {
-      lastResultCount = newResults.length;
-
-      // 只更新待处理计数（不记录日志，不区分成功/失败）
-      pendingCount = Math.max(0, totalCount - newResults.length);
-      updateStatsUI();
-
-      // 检查是否全部完成
-      if (newResults.length >= totalCount && totalCount > 0) {
-        onAllCompleted();
-      }
-    }
-  }, 300);
-}
-
-// ==================== 事件绑定 ====================
-function setupEventListeners() {
-  // 上传区域点击
-  uploadZone.addEventListener('click', () => fileInput.click());
-
-  // 拖拽上传
-  uploadZone.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    uploadZone.classList.add('drag-over');
-  });
-  uploadZone.addEventListener('dragleave', () => {
-    uploadZone.classList.remove('drag-over');
-  });
-  uploadZone.addEventListener('drop', (e) => {
-    e.preventDefault();
-    uploadZone.classList.remove('drag-over');
-    const file = e.dataTransfer.files[0];
-    if (file) handleFile(file);
-  });
-
-  // 文件选择
-  fileInput.addEventListener('change', (e) => {
-    const file = e.target.files[0];
-    if (file) handleFile(file);
-  });
-
-  // 移除文件
-  fileRemove.addEventListener('click', (e) => {
-    e.stopPropagation();
-    resetFile();
-  });
-
-  // 开始处理
-  startBtn.addEventListener('click', startBatch);
-
-  // 暂停
-  pauseBtn.addEventListener('click', togglePause);
-
-  // 停止
-  stopBtn.addEventListener('click', stopBatch);
-
-  // 导出 CSV
-  exportBtn.addEventListener('click', exportCsv);
-
-  // 清空批次
-  clearBtn.addEventListener('click', clearBatch);
-
-  // 超时配置变化时保存
-  timeoutInput.addEventListener('change', saveTimeoutSetting);
-  timeoutInput.addEventListener('input', () => {
-    const val = parseInt(timeoutInput.value, 10);
-    if (val < 10) timeoutInput.value = '10';
-    if (val > 600) timeoutInput.value = '600';
-  });
-}
-
-// ==================== 文件处理 ====================
-// 读取文件并解码为文本，优先尝试 GBK（中文 Windows 常见编码），兜底 UTF-8
-function readFileAsText(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const buffer = e.target.result;
-      // 先尝试 GBK 解码（中文 Windows 默认导出编码）
-      const decoder = new TextDecoder('GBK');
-      let text = decoder.decode(buffer);
-      // GBK 解析后若列名仍然是乱码字符，兜底用 UTF-8 重读
-      if (text.charCodeAt(0) > 0x4DBF && text.slice(0, 4) !== '页面AS') {
-        text = new TextDecoder('UTF-8').decode(buffer);
-      }
-      resolve(text);
-    };
-    reader.onerror = () => reject(reader.error);
-    reader.readAsArrayBuffer(file);
-  });
-}
-
-function handleFile(file) {
-  if (!file.name.endsWith('.csv')) {
-    alert('请上传 CSV 格式的文件');
-    return;
-  }
-
-  fileName.textContent = file.name;
-  fileCount.textContent = '解析中...';
-  fileInfo.classList.add('visible');
-  uploadZone.classList.add('has-file');
-
-  readFileAsText(file).then((csvText) => {
-    const results = Papa.parse(csvText, {
-      header: true,
-      skipEmptyLines: true
-    });
-
-    const rows = results.data;
-    parsedUrls = [];
-    let validCount = 0;
-    let invalidCount = 0;
-
-    urlPreviewBody.innerHTML = '';
-
-    // 兼容不同编码：UTF-8 列名和 GBK 列名同时支持
-    const colUrl = '原URL' in rows[0] ? '原URL'
-                : '\u539F\u0055\u0052\u004C' in rows[0] ? '\u539F\u0055\u0052\u004C'  // GBK乱码的"原URL"
-                : null;
-    const colDomain = 'URL对应域名' in rows[0] ? 'URL对应域名'
-                : null;
-
-    if (rows.length === 0 || !colUrl) {
-      alert('CSV 文件缺少"原URL"列，请确认文件格式正确。\n\n标准格式应为：\n页面AS, 原URL, URL对应域名, 目标域名, 类型, 外部链接数量, 自动评论运行结果');
-      resetFile();
-      return;
-    }
-
-    rows.forEach((row, idx) => {
-      let url = (row[colUrl] || '').trim();
-      let sourceDomain = colDomain ? (row[colDomain] || '').trim() : '';
-
-      if (!url) {
-        invalidCount++;
-        return;
-      }
-
-      // 补全协议头，确保 URL 可用
-      if (!/^https?:\/\//i.test(url)) {
-        url = 'https://' + url;
-      }
-
-      if (!isValidUrl(url)) {
-        invalidCount++;
-        return;
-      }
-
-      parsedUrls.push({
-        originalIndex: idx,
-        url,
-        sourceDomain
-      });
-      validCount++;
-
-      // 预览前5条
-      if (idx < 5) {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `<td>${idx + 1}</td><td>${escapeHtml(sourceDomain || url)}</td><td>${escapeHtml(url)}</td>`;
-        urlPreviewBody.appendChild(tr);
-      }
-    });
-
-    urlPreview.classList.add('visible');
-    fileCount.textContent = `共 ${validCount} 条 URL`;
-    if (invalidCount > 0) {
-      fileCount.textContent += `（跳过 ${invalidCount} 条无效）`;
-    }
-
-    updateCostHint(validCount);
-    startBtn.disabled = validCount === 0;
-  }).catch((err) => {
-    alert('CSV 读取失败：' + err.message);
-    resetFile();
-  });
-}
-
-function resetFile() {
-  fileInput.value = '';
-  fileInfo.classList.remove('visible');
-  uploadZone.classList.remove('has-file');
-  urlPreview.classList.remove('visible');
-  urlPreviewBody.innerHTML = '';
-  parsedUrls = [];
-  startBtn.disabled = true;
-  costHint.style.display = 'none';
-  pointsHint.textContent = '';
-}
-
-function updateCostHint(count) {
-  if (count === 0) return;
-  costHint.style.display = 'block';
-  costHint.textContent = `本次将消耗约 ${count} 积分（每条评论 1 积分），请确保余额充足`;
-  pointsHint.textContent = count > parseInt(pointsBalance.textContent || '0')
-    ? ' ⚠️ 积分不足，请先充值'
-    : '';
-}
-
-// ==================== 用户信息 ====================
 async function loadUserId() {
   return new Promise((resolve) => {
     chrome.storage.sync.get(['auto_comment_user_id'], (data) => {
@@ -329,6 +120,17 @@ async function loadTimeoutSetting() {
   });
 }
 
+async function loadConcurrentSetting() {
+  return new Promise((resolve) => {
+    chrome.storage.sync.get([CONCURRENT_TABS_STORAGE_KEY], (data) => {
+      const saved = parseInt(data[CONCURRENT_TABS_STORAGE_KEY], 10);
+      maxConcurrentTabs = (saved && saved >= 1 && saved <= 10) ? saved : DEFAULT_CONCURRENT_TABS;
+      concurrentInput.value = String(maxConcurrentTabs);
+      resolve();
+    });
+  });
+}
+
 function saveTimeoutSetting() {
   const val = parseInt(timeoutInput.value, 10);
   if (val >= 10 && val <= 600) {
@@ -336,6 +138,202 @@ function saveTimeoutSetting() {
     chrome.storage.sync.set({ [TIMEOUT_STORAGE_KEY]: val });
   } else {
     timeoutInput.value = String(timeoutSeconds);
+  }
+}
+
+function saveConcurrentSetting() {
+  const val = parseInt(concurrentInput.value, 10);
+  if (val >= 1 && val <= 10) {
+    maxConcurrentTabs = val;
+    chrome.storage.sync.set({ [CONCURRENT_TABS_STORAGE_KEY]: val });
+  } else {
+    concurrentInput.value = String(maxConcurrentTabs);
+  }
+}
+
+// ==================== 事件绑定 ====================
+function bindEvents() {
+  // 上传区域
+  uploadZone.addEventListener('click', () => fileInput.click());
+  uploadZone.addEventListener('dragover', (e) => { e.preventDefault(); uploadZone.classList.add('drag-over'); });
+  uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag-over'));
+  uploadZone.addEventListener('drop', handleFileDrop);
+  fileInput.addEventListener('change', handleFileSelect);
+
+  // 文件信息
+  fileRemove.addEventListener('click', resetFile);
+
+  // 操作按钮
+  startBtn.addEventListener('click', startBatch);
+  pauseBtn.addEventListener('click', togglePause);
+  stopBtn.addEventListener('click', stopBatch);
+  exportBtn.addEventListener('click', exportResults);
+  clearBtn.addEventListener('click', clearBatch);
+
+  // 设置
+  timeoutInput.addEventListener('change', saveTimeoutSetting);
+  concurrentInput.addEventListener('change', saveConcurrentSetting);
+
+  // 监听 background 消息（结果回调）
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message.type === 'BATCH_RESULT') {
+      handleTabResult(message.urlIndex, message.result, message.aiContent, message.errorMessage);
+    }
+  });
+}
+
+// ==================== CSV 解析 ====================
+function handleFileDrop(e) {
+  e.preventDefault();
+  uploadZone.classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file) processFile(file);
+}
+
+function handleFileSelect(e) {
+  const file = e.target.files[0];
+  if (file) processFile(file);
+}
+
+function processFile(file) {
+  if (!file.name.endsWith('.csv')) {
+    alert('请上传 CSV 文件');
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    parseCSV(e.target.result, file.name);
+  };
+  reader.onerror = () => {
+    alert('文件读取失败');
+  };
+  reader.readAsText(file);
+}
+
+function parseCSV(text, fileNameParam) {
+  const lines = text.split(/\r?\n/).filter((line) => line.trim());
+  if (lines.length < 2) {
+    alert('CSV 文件内容为空或格式错误');
+    return;
+  }
+
+  const header = parseCSVLine(lines[0]);
+  const colUrl = header.findIndex((h) => h === '原URL' || h === 'URL' || h === 'url' || h === 'Url');
+  const colDomain = header.findIndex((h) => h === 'URL对应域名' || h === '来源域名' || h === 'sourceDomain');
+
+  if (colUrl === -1) {
+    alert('CSV 文件缺少"原URL"列，请确认文件格式正确。\n\n标准格式应为：\n页面AS, 原URL, URL对应域名, 目标域名, 类型, 外部链接数量, 自动评论运行结果');
+    resetFile();
+    return;
+  }
+
+  let validCount = 0;
+  let invalidCount = 0;
+  parsedUrls = [];
+  urlPreviewBody.innerHTML = '';
+
+  for (let i = 1; i < lines.length; i++) {
+    const row = parseCSVLine(lines[i]);
+    let url = (row[colUrl] || '').trim();
+    let sourceDomain = colDomain >= 0 ? (row[colDomain] || '').trim() : '';
+
+    if (!url) {
+      invalidCount++;
+      continue;
+    }
+
+    if (!/^https?:\/\//i.test(url)) {
+      url = 'https://' + url;
+    }
+
+    if (!isValidUrl(url)) {
+      invalidCount++;
+      continue;
+    }
+
+    parsedUrls.push({
+      originalIndex: parsedUrls.length,
+      url,
+      sourceDomain
+    });
+    validCount++;
+
+    const tr = document.createElement('tr');
+    tr.dataset.url = url;
+    tr.innerHTML = `<td>${parsedUrls.length}</td><td>${escapeHtml(sourceDomain || url)}</td><td>${escapeHtml(url)}</td>`;
+    urlPreviewBody.appendChild(tr);
+  }
+
+  // 检测重复
+  const seenUrls = new Set();
+  let duplicateCount = 0;
+  urlPreviewBody.querySelectorAll('tr').forEach((tr) => {
+    const url = tr.dataset.url;
+    if (seenUrls.has(url)) {
+      tr.classList.add('duplicate');
+      duplicateCount++;
+    }
+    seenUrls.add(url);
+  });
+
+  urlPreview.classList.add('visible');
+  fileName.textContent = fileNameParam || '已上传文件';
+  fileInfo.classList.add('visible');
+  uploadZone.classList.add('has-file');
+  fileCount.textContent = `共 ${validCount} 条 URL`;
+  if (invalidCount > 0) fileCount.textContent += `（跳过 ${invalidCount} 条无效）`;
+  if (duplicateCount > 0) {
+    fileCount.textContent += `（发现 ${duplicateCount} 条重复）`;
+    document.getElementById('duplicateCount').textContent = `⚠️ ${duplicateCount} 条重复`;
+  }
+  updateCostHint(validCount);
+  startBtn.disabled = validCount === 0;
+}
+
+function parseCSVLine(line) {
+  const result = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    if (char === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === ',' && !inQuotes) {
+      result.push(current.trim());
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  result.push(current.trim());
+  return result;
+}
+
+function resetFile() {
+  fileInput.value = '';
+  fileInfo.classList.remove('visible');
+  uploadZone.classList.remove('has-file');
+  urlPreview.classList.remove('visible');
+  urlPreviewBody.innerHTML = '';
+  parsedUrls = [];
+  startBtn.disabled = true;
+  fileCount.textContent = '';
+  document.getElementById('duplicateCount').textContent = '';
+  updateCostHint(0);
+}
+
+function updateCostHint(count) {
+  if (count === 0) {
+    costHint.textContent = '';
+  } else {
+    costHint.textContent = `本次预计消耗 ${count} 条积分`;
   }
 }
 
@@ -350,59 +348,207 @@ async function startBatch() {
     return;
   }
 
-  // 记录初始积分
   initialPoints = parseInt(pointsBalance.textContent || '0', 10);
-
-  // 生成 batchId
   batchId = generateUUID();
   totalCount = parsedUrls.length;
+  successCount = 0;
+  failCount = 0;
   pendingCount = totalCount;
+  currentIndex = 0;
+  localResults = [];
+  status = 'running';
 
-  // 提交到后端
   setStatus('running');
   updateUI();
+  updateStatsUI();
+
+  // 串行打开初始标签页
+  await openNextTabConcurrently(maxConcurrentTabs);
+}
+
+// 串行打开 N 个标签页（确保每个 URL 只处理一次）
+async function openNextTabConcurrently(count) {
+  for (let i = 0; i < count; i++) {
+    if (status !== 'running') break;
+    await openNextTabSync();
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+}
+
+function togglePause() {
+  if (status === 'running') {
+    setStatus('paused');
+    if (pollTimer) clearTimeout(pollTimer);
+    stopTimeoutChecker();
+  } else if (status === 'paused') {
+    setStatus('running');
+    // 继续处理
+    while (activeTabCount < maxConcurrentTabs && currentIndex < totalCount) {
+      openNextTabSync();
+    }
+  }
+}
+
+async function stopBatch() {
+  setStatus('idle');
+  if (pollTimer) clearTimeout(pollTimer);
+  stopTimeoutChecker();
+
+  const tabIds = Array.from(activeTabs.keys());
+  activeTabs.clear();
+  for (const tabId of tabIds) {
+    try {
+      await new Promise((resolve) => {
+        chrome.tabs.remove(tabId, () => resolve());
+      });
+    } catch (_) {}
+  }
+  activeTabCount = 0;
+  updateStatsUI();
+  updateUI();
+}
+
+// 立即打开下一个标签页（从本地队列获取）
+async function openNextTabSync() {
+  if (isOpeningTab) return;
+  isOpeningTab = true;
+  await openNextTab();
+  isOpeningTab = false;
+}
+
+async function openNextTab() {
+  if (status !== 'running') return;
+  if (activeTabCount >= maxConcurrentTabs) return;
+  if (currentIndex >= totalCount) return;
+
+  const urlIndex = currentIndex;
+  const { url } = parsedUrls[urlIndex];
+  currentIndex++;
 
   try {
-    const resp = await fetch(`${API_BASE}/batch/create`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        batchId,
-        userId,
-        totalCount,
-        urls: parsedUrls
-      })
+    chrome.tabs.create({ url, active: false }, (tab) => {
+      activeTabCount++;
+      activeTabs.set(tab.id, { urlIndex, startTime: Date.now() });
+      startTimeoutChecker();
+      updateStatsUI();
+
+      // 监听标签页关闭
+      const listener = (tabId, removeInfo) => {
+        if (tabId === tab.id) {
+          activeTabs.delete(tab.id);
+          activeTabCount = Math.max(0, activeTabCount - 1);
+          updateStatsUI();
+          chrome.tabs.onRemoved.removeListener(listener);
+
+          // 标签关闭后补充新标签
+          if (status === 'running' && currentIndex < totalCount) {
+            openNextTabSync();
+          } else if (status === 'running' && activeTabCount === 0) {
+            onAllCompleted();
+          }
+        }
+      };
+      chrome.tabs.onRemoved.addListener(listener);
+
+      // 向标签页发送任务信息
+      setTimeout(() => {
+        chrome.tabs.sendMessage(tab.id, {
+          type: 'BATCH_HANDLE',
+          batchId,
+          urlIndex,
+          url
+        }).then((response) => {
+          if (response && response.ok) {
+            handleTabResult(urlIndex, 'success', response.aiContent, null);
+            chrome.tabs.remove(tab.id, () => {});
+          }
+        }).catch(() => {});
+      }, 1000);
     });
-    const json = await resp.json();
-    if (json.code !== 0) {
-      alert('创建批次失败：' + (json.message || '未知错误'));
-      setStatus('idle');
-      return;
-    }
   } catch (e) {
-    alert('网络错误，无法连接服务器：' + e.message);
-    setStatus('idle');
-    return;
+    console.error('[batch] openNextTab 错误:', e);
+    // 出错时继续下一个
+    if (currentIndex < totalCount) {
+      setTimeout(openNextTabSync, 1000);
+    }
+  }
+}
+
+// 处理标签页结果
+function handleTabResult(urlIndex, result, aiContent, errorMessage) {
+  const item = parsedUrls[urlIndex];
+  if (!item) return;
+
+  // 避免重复处理
+  if (localResults.some((r) => r.originalIndex === urlIndex)) return;
+
+  const resultEntry = {
+    originalIndex: urlIndex,
+    url: item.url,
+    sourceDomain: item.sourceDomain || '',
+    result: result,
+    aiContent: aiContent || null,
+    errorMessage: errorMessage || null,
+    timestamp: Date.now()
+  };
+
+  localResults.push(resultEntry);
+
+  if (result === 'success') {
+    successCount++;
+    addLog(item.url, 'success', aiContent || '评论成功');
+  } else {
+    failCount++;
+    addLog(item.url, 'fail', errorMessage || '处理失败');
   }
 
-  // 保存会话以便刷新后恢复
-  saveSession();
+  pendingCount = totalCount - successCount - failCount;
+  updateStatsUI();
 
-  // 先尝试上报待定的结果
-  await flushPendingReports();
+  // 保存到本地存储
+  saveLocalResults();
 
-  // 开始轮询处理
-  scheduleNext();
+  // 检查是否全部完成
+  if (successCount + failCount >= totalCount) {
+    onAllCompleted();
+  }
 }
 
-function scheduleNext() {
-  if (status !== 'running') return;
-  if (pollTimer) clearTimeout(pollTimer);
-  pollTimer = setTimeout(pollAndProcess, POLL_INTERVAL);
-  // 同时启动超时检测定时器
-  startTimeoutChecker();
+// 保存结果到本地存储
+function saveLocalResults() {
+  chrome.storage.local.set({
+    batchLocalResults: {
+      batchId,
+      totalCount,
+      results: localResults.slice(-100) // 只保留最近100条
+    }
+  });
 }
 
+// 全部完成
+async function onAllCompleted() {
+  setStatus('completed');
+  stopTimeoutChecker();
+
+  // 通过积分差值计算成功/失败数（备用验证）
+  let finalPoints = initialPoints;
+  try {
+    const resp = await fetch(`${API_BASE}/get-points?userId=${encodeURIComponent(userId)}`);
+    const json = await resp.json();
+    if (json.success && json.points !== undefined) {
+      finalPoints = json.points;
+    }
+  } catch (_) {}
+
+  const pointsDiff = initialPoints - finalPoints;
+  if (pointsDiff > 0 && Math.abs(pointsDiff - successCount) > 2) {
+    console.warn(`积分差值(${pointsDiff})与成功数(${successCount})不一致，请以实际结果为准`);
+  }
+
+  updateStatsUI();
+}
+
+// 超时检测
 function startTimeoutChecker() {
   if (timeoutCheckTimer) return;
   timeoutCheckTimer = setInterval(() => {
@@ -431,397 +577,131 @@ async function checkTimeouts() {
   for (const [tabId, info] of activeTabs) {
     const elapsed = (now - info.startTime) / 1000;
     if (elapsed > timeoutSeconds) {
-      toRemove.push({ tabId, urlId: info.urlId, url: info.url });
+      toRemove.push({ tabId, urlIndex: info.urlIndex });
     }
   }
-  for (const { tabId, urlId, url } of toRemove) {
+  for (const { tabId, urlIndex } of toRemove) {
     activeTabs.delete(tabId);
-    reportTabClosedFallback(urlId, url);
+    handleTabResult(urlIndex, 'fail', null, '处理超时');
     try {
       await new Promise((resolve) => {
         chrome.tabs.remove(tabId, () => resolve());
       });
     } catch (_) {}
   }
-}
-
-async function pollAndProcess() {
-  if (status !== 'running') return;
-  if (isPolling) return;
-  isPolling = true;
-
-  // 先尝试上报pending结果
-  await flushPendingReports();
-
-  if (activeTabCount >= MAX_CONCURRENT_TABS) {
-    // 标签页已满，等待完成（标签关闭时 onRemoved 会调用 scheduleNext）
-    isPolling = false;
-    scheduleNext();
-    return;
-  }
-
-  // 请求下一个URL
-  try {
-    const resp = await fetch(`${API_BASE}/batch/${batchId}/next-url`);
-    const json = await resp.json();
-
-    if (json.data === null) {
-      // 全部处理完成
-      onAllCompleted();
-      isPolling = false;
-      return;
-    }
-
-    const { urlId, url, originalIndex } = json.data;
-
-    // 打开标签页（必须等到 create 回调执行后再 ++activeTabCount，避免标签页快速关闭导致计数错乱）
-    chrome.tabs.create({ url, active: false }, (tab) => {
-      activeTabCount++;
-      // 记录标签页开启时间，用于超时检测
-      activeTabs.set(tab.id, { batchId, urlId, startTime: Date.now(), url });
-      // 启动超时检测定时器（若尚未启动）
-      startTimeoutChecker();
-      updateStatsUI();
-
-      // 监听标签页关闭，以减少 activeTabCount（只在未收到成功确认时触发兜底上报）
-      let alreadyConfirmed = false;
-      const listener = (tabId, removeInfo) => {
-        if (tabId === tab.id) {
-          const tabInfo = activeTabs.get(tab.id);
-          activeTabs.delete(tab.id);
-          // 仅当未收到成功确认时，才兜底上报失败（防止重复上报）
-          if (!alreadyConfirmed) {
-            reportTabClosedFallback(urlId, tabInfo && tabInfo.url);
-          }
-          activeTabCount = Math.max(0, activeTabCount - 1);
-          updateStatsUI();
-          chrome.tabs.onRemoved.removeListener(listener);
-          scheduleNext();
-        }
-      };
-      chrome.tabs.onRemoved.addListener(listener);
-
-      // 向标签页发送 batch 任务信息
-      setTimeout(() => {
-        chrome.tabs.sendMessage(tab.id, {
-          type: 'BATCH_HANDLE',
-          batchId,
-          urlId,
-          url,
-          originalIndex
-        }).then((response) => {
-          if (response && response.ok) {
-            alreadyConfirmed = true;
-            chrome.tabs.remove(tab.id, () => {});
-          }
-        }).catch(() => {});
-      }, 1000);
-    });
-  } catch (e) {
-    console.error('[batch] pollAndProcess 错误:', e);
-    isPolling = false;
-    scheduleNext();
-    return;
-  }
-
-  // 本次轮询结束，释放锁。标签关闭时会触发 scheduleNext → 下一次 pollAndProcess
-  isPolling = false;
-}
-
-function togglePause() {
-  if (status === 'running') {
-    setStatus('paused');
-    if (pollTimer) clearTimeout(pollTimer);
-    stopTimeoutChecker();
-  } else if (status === 'paused') {
-    setStatus('running');
-    scheduleNext();
-  }
-}
-
-async function stopBatch() {
-  setStatus('idle');
-  if (pollTimer) clearTimeout(pollTimer);
-  stopTimeoutChecker();
-  // 关闭所有仍在记录中的标签页
-  const tabIds = Array.from(activeTabs.keys());
-  activeTabs.clear();
-  for (const tabId of tabIds) {
-    try {
-      await new Promise((resolve) => {
-        chrome.tabs.remove(tabId, () => resolve());
-      });
-    } catch (_) {}
-  }
-  activeTabCount = 0;
-  clearSession();
-  updateUI();
-}
-
-// ==================== 结果上报 ====================
-/** 标签关闭时兜底上报失败：避免「未写入服务端」时 next-url 反复返回同一条 */
-async function reportTabClosedFallback(urlId, pageUrl) {
-  if (!batchId || urlId == null) return;
-
-  const data = await new Promise((resolve) => {
-    chrome.storage.local.get(['batchResults', 'batchReportedUrls'], (d) => resolve(d));
-  });
-
-  const reported = data.batchReportedUrls || [];
-  const urlKey = `${batchId}:${urlId}`;
-  if (reported.includes(urlKey)) return;
-
-  // 写入 batchResults，使 batch.js 轮询立即感知到失败（url 供日志展示）
-  const results = data.batchResults || [];
-  results.push({
-    batchId,
-    urlId,
-    url: pageUrl || '',
-    result: 'fail',
-    aiContent: null,
-    errorMessage: '标签页已关闭（超时或用户主动关闭）',
-    timestamp: Date.now()
-  });
-  if (results.length > 100) results.shift();
-
-  reported.push(urlKey);
-  if (reported.length > 500) reported.shift();
-
-  await new Promise((resolve) => {
-    chrome.storage.local.set({ batchResults: results, batchReportedUrls: reported }, resolve);
-  });
-
-  // 同时发给后端（异步，不阻塞）
-  fetch(`${API_BASE}/batch/${encodeURIComponent(batchId)}/report`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      urlId,
-      result: 'fail',
-      aiContent: null,
-      errorMessage: '标签页已关闭（超时或用户主动关闭）'
-    })
-  }).catch(() => {});
-}
-
-async function reportResult(urlId, result, aiContent, errorMessage) {
-  if (!batchId) return;
-
-  try {
-    const resp = await fetch(`${API_BASE}/batch/${batchId}/report`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ urlId, result, aiContent, errorMessage })
-    });
-    const json = await resp.json();
-    if (json.code !== 0) {
-      throw new Error(json.message || '上报失败');
-    }
-    return true;
-  } catch (e) {
-    console.error('[batch] reportResult 失败:', e);
-    // 加入重试队列
-    pendingReports.push({ urlId, result, aiContent, errorMessage, retry: 0 });
-    savePendingReports();
-    return false;
-  }
-}
-
-async function flushPendingReports() {
-  if (pendingReports.length === 0) return;
-  const toReport = [...pendingReports];
-  pendingReports = [];
-
-  for (const item of toReport) {
-    try {
-      const resp = await fetch(`${API_BASE}/batch/${batchId}/report`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(item)
-      });
-      const json = await resp.json();
-      if (json.code !== 0 && json.message !== '已处理，忽略重复上报') {
-        throw new Error(json.message);
-      }
-    } catch (e) {
-      if (item.retry < MAX_RETRY) {
-        item.retry++;
-        pendingReports.push(item);
-      }
-    }
-  }
-
-  if (pendingReports.length > 0) {
-    savePendingReports();
-  }
-}
-
-function addLog(url, result, message) {
-  const item = document.createElement('div');
-  item.className = 'log-item';
-
-  const icon = result === 'success' ? '√' : result === 'fail' ? '×' : '⋯';
-  const iconClass = result === 'success' ? 'success' : result === 'fail' ? 'fail' : 'info';
-
-  item.innerHTML = `
-    <span class="log-icon ${iconClass}">${icon}</span>
-    <span class="log-url">${escapeHtml(url)}</span>
-    ${message ? `<span style="color:#9ca3af;font-size:11px;margin-left:6px">${escapeHtml(message)}</span>` : ''}
-    <span class="log-time">${formatTime(new Date())}</span>
-  `;
-
-  logList.insertBefore(item, logList.firstChild);
-
-  // 限制日志数量
-  while (logList.children.length > 100) {
-    logList.removeChild(logList.lastChild);
-  }
-}
-
-async function onAllCompleted() {
-  setStatus('completed');
-  stopTimeoutChecker();
-  activeTabs.clear();
-  clearSession();
-
-  // 通过积分差值计算成功/失败数
-  let finalPoints = initialPoints;
-  try {
-    const resp = await fetch(`${API_BASE}/get-points?userId=${encodeURIComponent(userId)}`);
-    const json = await resp.json();
-    if (json.success && json.points !== undefined) {
-      finalPoints = json.points;
-    }
-  } catch (_) {}
-
-  const pointsUsed = initialPoints - finalPoints;
-  const successCount = pointsUsed > 0 ? pointsUsed : 0;
-  const failCount = totalCount - successCount;
-
-  // 更新 UI
-  document.querySelector('.stat-success').classList.remove('inactive');
-  document.querySelector('.stat-fail').classList.remove('inactive');
-  document.getElementById('successCount').textContent = successCount;
-  document.getElementById('failCount').textContent = failCount;
-  document.getElementById('pendingCount').textContent = '0';
-  document.getElementById('progressText').textContent = `${totalCount}/${totalCount}`;
-
-  addLog('系统', 'success', `处理完毕：${successCount} 成功，${failCount} 失败（积分：${initialPoints} → ${finalPoints}，消耗 ${pointsUsed}）`);
 }
 
 // ==================== UI 更新 ====================
 function setStatus(s) {
   status = s;
-  updateStatusBadge();
-}
-
-function updateStatusBadge() {
-  statusBadge.className = `status-badge ${status}`;
-  const labels = { idle: '空闲', running: '处理中', paused: '已暂停', completed: '已完成' };
-  statusBadge.textContent = labels[status] || status;
+  statusBadge.textContent = {
+    idle: '空闲',
+    running: '运行中',
+    paused: '已暂停',
+    completed: '已完成'
+  }[s] || s;
+  statusBadge.className = 'status-badge ' + s;
 }
 
 function updateUI() {
-  // 根据状态显示/隐藏按钮
-  if (status === 'idle' || status === 'completed') {
-    startBtn.style.display = '';
-    startBtn.disabled = parsedUrls.length === 0;
-    pauseBtn.style.display = 'none';
-    stopBtn.style.display = 'none';
-    progressSection.classList.remove('visible');
-    logSection.classList.remove('visible');
-    footerActions.classList.remove('visible');
-  } else if (status === 'running') {
-    startBtn.style.display = 'none';
-    pauseBtn.style.display = '';
-    stopBtn.style.display = '';
-    pauseBtn.textContent = '⏸ 暂停';
-    progressSection.classList.add('visible');
-    logSection.classList.add('visible');
-    footerActions.classList.remove('visible');
-  } else if (status === 'paused') {
-    startBtn.style.display = 'none';
-    pauseBtn.style.display = '';
-    stopBtn.style.display = '';
-    pauseBtn.textContent = '▶ 继续';
-    progressSection.classList.add('visible');
-    logSection.classList.add('visible');
-    footerActions.classList.remove('visible');
-  }
+  const isIdle = status === 'idle';
+  const isRunning = status === 'running';
+  const isPaused = status === 'paused';
+  const isCompleted = status === 'completed';
+
+  startBtn.disabled = isRunning || isPaused || parsedUrls.length === 0;
+  pauseBtn.disabled = !isRunning && !isPaused;
+  pauseBtn.textContent = isPaused ? '继续' : '暂停';
+  stopBtn.disabled = isIdle;
+  exportBtn.disabled = isIdle || localResults.length === 0;
+  clearBtn.disabled = isRunning || isPaused;
+
+  progressSection.style.display = isIdle ? 'none' : 'block';
+  logSection.style.display = isIdle ? 'none' : 'flex';
+  footerActions.style.display = isIdle ? 'none' : 'flex';
 }
 
 function updateStatsUI() {
-  const pct = totalCount > 0 ? Math.round(((totalCount - pendingCount) / totalCount) * 100) : 0;
-
-  progressBar.style.width = pct + '%';
-  successCountEl.textContent = '0';
-  failCountEl.textContent = '0';
+  const processed = successCount + failCount;
+  const percent = totalCount > 0 ? Math.round((processed / totalCount) * 100) : 0;
+  progressBar.style.width = percent + '%';
+  progressText.textContent = `${processed}/${totalCount} (${percent}%)`;
+  successCountEl.textContent = successCount;
+  failCountEl.textContent = failCount;
   pendingCountEl.textContent = pendingCount;
-  progressText.textContent = `${totalCount - pendingCount}/${totalCount}`;
 }
 
-// ==================== 导出 & 清空 ====================
-async function exportCsv() {
-  if (!batchId) return;
-  try {
-    const resp = await fetch(`${API_BASE}/batch/${batchId}/export`);
-    if (!resp.ok) {
-      const errData = await resp.json().catch(() => ({}));
-      alert('导出失败：' + (errData.message || `HTTP ${resp.status}`));
-      return;
-    }
-    const blob = await resp.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `batch_result_${batchId}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  } catch (e) {
-    alert('导出失败：' + e.message);
+function addLog(url, result, message) {
+  const item = document.createElement('div');
+  item.className = 'log-item ' + result;
+
+  const time = formatTime(new Date());
+  const shortUrl = url.length > 50 ? url.substring(0, 47) + '...' : url;
+
+  item.innerHTML = `
+    <span class="log-time">${time}</span>
+    <span class="log-result ${result}">${result === 'success' ? '✓' : '✗'}</span>
+    <span class="log-url" title="${escapeHtml(url)}">${escapeHtml(shortUrl)}</span>
+    <span class="log-message">${escapeHtml(message)}</span>
+  `;
+
+  logList.insertBefore(item, logList.firstChild);
+
+  if (logList.children.length > 200) {
+    logList.removeChild(logList.lastChild);
   }
+}
+
+// ==================== 导出 ====================
+function exportResults() {
+  if (localResults.length === 0) {
+    alert('没有可导出的结果');
+    return;
+  }
+
+  const header = '原序号,URL,来源域名,结果,AI内容,错误信息,处理时间';
+  const rows = localResults.map((r) => {
+    const escape = (val) => {
+      if (val == null) return '';
+      const str = String(val);
+      if (str.includes('"') || str.includes(',') || str.includes('\n')) {
+        return `"${str.replace(/"/g, '""')}"`;
+      }
+      return str;
+    };
+    return [
+      r.originalIndex + 1,
+      escape(r.url),
+      escape(r.sourceDomain),
+      r.result,
+      escape(r.aiContent),
+      escape(r.errorMessage),
+      r.timestamp ? new Date(r.timestamp).toLocaleString() : ''
+    ].join(',');
+  });
+
+  const csv = [header, ...rows].join('\n');
+  const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `batch_result_${batchId}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 function clearBatch() {
   resetFile();
   batchId = null;
-  totalCount = pendingCount = 0;
+  totalCount = successCount = failCount = pendingCount = 0;
+  currentIndex = 0;
+  localResults = [];
   logList.innerHTML = '';
   setStatus('idle');
   updateUI();
-  clearSession();
-}
-
-// ==================== 会话持久化 ====================
-function saveSession() {
-  chrome.storage.local.set({
-    batchSession: { batchId, totalCount }
-  });
-}
-
-function restoreSession() {
-  chrome.storage.local.get(['batchSession'], (data) => {
-    if (data.batchSession && data.batchSession.batchId) {
-      // 有未完成的批次，可以选择恢复
-      // 这里简化处理，不自动恢复
-    }
-  });
-}
-
-function clearSession() {
-  chrome.storage.local.remove(['batchSession']);
-}
-
-function savePendingReports() {
-  chrome.storage.local.set({ pendingReports });
-}
-
-function loadPendingReports() {
-  chrome.storage.local.get(['pendingReports'], (data) => {
-    pendingReports = data.pendingReports || [];
-  });
+  chrome.storage.local.remove(['batchLocalResults']);
 }
 
 // ==================== 工具函数 ====================
@@ -854,19 +734,3 @@ function formatTime(date) {
   const s = String(date.getSeconds()).padStart(2, '0');
   return `${h}:${m}:${s}`;
 }
-
-// ==================== 接收 content script 消息 ====================
-// background 收到 content.js 消息后转发给 batch.js
-// 注意：本文件运行在 batch.html 页面，不能直接监听 chrome.runtime
-// 所以在 background.js 中做桥接，将消息转发到当前标签页
-// 这里通过 chrome.storage 做桥接（简单方案）
-
-// 更好的方案：扩展端页面通过 chrome.runtime.onMessage 监听
-// 但 batch.html 不是 background，所以需要 background.js 做转发
-// 简化处理：使用轮询 chrome.storage.local 读取结果
-
-// 监听来自 background 的消息（通过 iframe 注入方式）
-// 这里改为通过 chrome.storage 广播结果，由 batch.html 轮询读取
-
-// 初始化时加载 pendingReports
-loadPendingReports();

@@ -7,19 +7,17 @@ chrome.action.onClicked.addListener((tab) => {
   }
 });
 
-const BATCH_API_BASE = 'https://jieyunsang.cn/api';
-
 /**
- * 将批量结果写入 storage + 上报服务端（在 service worker 中执行，不受页面跳转/关闭影响）
+ * 将批量结果写入 storage（本地存储，由 batch.js 轮询读取）
  */
 async function persistBatchReport(message) {
-  const { batchId, urlId, url: pageUrl = '', result, aiContent, errorMessage } = message;
+  const { batchId, urlIndex, url: pageUrl = '', result, aiContent, errorMessage } = message;
 
   const data = await chrome.storage.local.get(['batchResults', 'batchReportedUrls']);
   const results = data.batchResults || [];
   results.push({
     batchId,
-    urlId,
+    urlIndex,
     url: pageUrl,
     result,
     aiContent,
@@ -30,26 +28,13 @@ async function persistBatchReport(message) {
 
   let reported = data.batchReportedUrls || [];
   if (!Array.isArray(reported)) reported = [];
-  const urlKey = `${batchId}:${urlId}`;
+  const urlKey = `${batchId}:${urlIndex}`;
   if (!reported.includes(urlKey)) {
     reported.push(urlKey);
     if (reported.length > 500) reported.shift();
   }
 
   await chrome.storage.local.set({ batchResults: results, batchReportedUrls: reported });
-
-  try {
-    const resp = await fetch(`${BATCH_API_BASE}/batch/${encodeURIComponent(batchId)}/report`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ urlId, result, aiContent, errorMessage })
-    });
-    if (!resp.ok) {
-      console.warn('[background] batch report HTTP', resp.status);
-    }
-  } catch (err) {
-    console.error('[background] batch report 请求失败:', err);
-  }
 }
 
 // content.js 确认评论已提交（标签页可能刷新，context 丢失，background 仍活着）
@@ -59,12 +44,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       try {
         await persistBatchReport({
           batchId: message.batchId,
-          urlId: message.urlId,
+          urlIndex: message.urlIndex,
           url: message.url || '',
-          result: 'success',
-          aiContent: message.aiContent,
-          errorMessage: null
+          result: message.result || 'success',
+          aiContent: message.aiContent || null,
+          errorMessage: message.errorMessage || null
         });
+
+        // 转发给 popup（batch.js）
+        chrome.runtime.sendMessage({
+          type: 'BATCH_RESULT',
+          urlIndex: message.urlIndex,
+          result: message.result || 'success',
+          aiContent: message.aiContent || null,
+          errorMessage: message.errorMessage || null
+        }).catch(() => {});
+
         sendResponse({ ok: true });
       } catch (e) {
         sendResponse({ ok: false, error: String(e) });
@@ -74,7 +69,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
-// 批量任务结果：content / batch 页 -> background 持久化（须等 storage 落盘后再 response，供 content await）
+// 批量任务结果：content / batch 页 -> background 持久化
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message && message.type === 'BATCH_REPORT_RESULT') {
     (async () => {
