@@ -904,7 +904,7 @@
     if (
       qwenPanelEl &&
       typeof qwenPanelEl._qwenSetGenerateLoading === 'function' &&
-      typeof qwenPanelEl._qwenSetStatus === 'function'
+      typeof qwenPanelEl?._qwenSetStatus === 'function'
     ) {
       qwenPanelEl._qwenSetStatus('正在自动生成推广文案，请稍候…', '#9ca3af');
       qwenPanelEl._qwenSetGenerateLoading(true);
@@ -928,9 +928,7 @@
         if (!userProfile.name) missing.push('姓名（Name）');
         if (!userProfile.email) missing.push('邮箱（Email）');
         const msg = '请先在扩展选项页填写' + missing.join('和') + '，否则无法自动提交评论！';
-        if (typeof qwenPanelEl._qwenSetStatus === 'function') {
-          qwenPanelEl._qwenSetStatus(msg, '#f97373');
-        }
+        qwenPanelEl?._qwenSetStatus(msg, '#f97373');
         console.error('[AutoComment-AutoLoad] ' + msg   );
         return;
       }
@@ -941,34 +939,26 @@
 
       if (shouldAutoSubmit) {
         console.log('[AutoComment-AutoLoad] 准备自动提交评论...');
-        if (typeof qwenPanelEl._qwenSetStatus === 'function') {
-          qwenPanelEl._qwenSetStatus('正在自动提交评论，请稍候…', '#9ca3af');
-        }
+        qwenPanelEl?._qwenSetStatus('正在自动提交评论，请稍候…', '#9ca3af');
 
         // 确保所有表单字段都已填好，再点击提交按钮
         const fillResult = await ensureAllCommentFormFieldsFilled(text);
 
         if (!fillResult.success) {
           const msg = '以下字段缺失，无法自动提交：' + fillResult.missingFields.join('、');
-          if (typeof qwenPanelEl._qwenSetStatus === 'function') {
-            qwenPanelEl._qwenSetStatus(msg + '，请手动检查', '#f97373');
-          }
+          qwenPanelEl?._qwenSetStatus(msg + '，请手动检查', '#f97373');
           console.error('[AutoComment-AutoLoad] 自动提交跳过 - 字段缺失:', fillResult.missingFields);
           return;
         }
 
         const submitButton = findCommentSubmitButton();
         if (!submitButton) {
-          if (typeof qwenPanelEl._qwenSetStatus === 'function') {
-            qwenPanelEl._qwenSetStatus('未找到提交按钮，请手动提交', '#f59e0b');
-          }
+          qwenPanelEl?._qwenSetStatus('未找到提交按钮，请手动提交', '#f59e0b');
           return;
         }
 
         if (!isButtonClickable(submitButton)) {
-          if (typeof qwenPanelEl._qwenSetStatus === 'function') {
-            qwenPanelEl._qwenSetStatus('提交按钮不可见，请手动检查', '#f59e0b');
-          }
+          qwenPanelEl?._qwenSetStatus('提交按钮不可见，请手动检查', '#f59e0b');
           return;
         }
 
@@ -977,20 +967,14 @@
 
         const result = await clickCommentSubmitButton();
         if (result.success) {
-          if (typeof qwenPanelEl._qwenSetStatus === 'function') {
-            qwenPanelEl._qwenSetStatus('评论已自动提交！', '#22c55e');
-          }
+          qwenPanelEl?._qwenSetStatus('评论已自动提交！', '#22c55e');
         } else {
-          if (typeof qwenPanelEl._qwenSetStatus === 'function') {
-            qwenPanelEl._qwenSetStatus('自动提交失败：' + (result.error || '未知错误') + '，请手动提交', '#f97373');
-          }
+          qwenPanelEl?._qwenSetStatus('自动提交失败：' + (result.error || '未知错误') + '，请手动提交', '#f97373');
         }
       } else {
         // 未开启自动提交，仅填充文案并高亮提交按钮
         console.log('[AutoComment-AutoLoad] 未开启自动提交，仅填充文案...');
-        if (typeof qwenPanelEl._qwenSetStatus === 'function') {
-          qwenPanelEl._qwenSetStatus('已自动生成推广文案，可以复制使用。', '#22c55e');
-        }
+        qwenPanelEl?._qwenSetStatus('已自动生成推广文案，可以复制使用。', '#22c55e');
 
         const submitButton = findCommentSubmitButton();
         if (submitButton) {
@@ -1005,13 +989,7 @@
       }
     } catch (err) {
       console.error('[AutoComment-AutoLoad] 生成推广文案失败:', err);
-      if (
-        qwenPanelEl &&
-        typeof qwenPanelEl._qwenSetGenerateLoading === 'function' &&
-        typeof qwenPanelEl._qwenSetStatus === 'function'
-      ) {
-        qwenPanelEl._qwenSetStatus('自动生成推广文案失败，请稍后重试。', '#f97373');
-      }
+      qwenPanelEl?._qwenSetStatus('自动生成推广文案失败，请稍后重试。', '#f97373');
     } finally {
       if (qwenPanelEl && typeof qwenPanelEl._qwenSetGenerateLoading === 'function') {
         qwenPanelEl._qwenSetGenerateLoading(false);
