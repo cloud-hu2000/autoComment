@@ -313,6 +313,7 @@
 
       .stat-success .num { color: #059669; }
       .stat-fail .num { color: #dc2626; }
+      .stat-skipped .num { color: #d97706; }
       .stat-pending .num { color: #2563eb; }
 
       /* 处理过程中成功/失败数尚未确定时淡化显示 */
@@ -477,6 +478,11 @@
         border-top: 1px solid #f3f4f6;
         color: #374151;
         vertical-align: middle;
+        max-width: 300px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        word-break: break-all;
       }
 
       .stats-table tr:hover td { background: #f0fdf4; }
@@ -484,6 +490,7 @@
       .stats-table tr.url-pending td { background: #eff6ff; }
       .stats-table tr.url-success td { background: #f0fdf4; }
       .stats-table tr.url-fail td { background: #fff5f5; }
+      .stats-table tr.url-skipped td { background: #fffbeb; }
 
       .result-badge {
         display: inline-block;
@@ -494,6 +501,7 @@
       }
       .result-badge.success { background: #d1fae5; color: #065f46; }
       .result-badge.fail { background: #fee2e2; color: #991b1b; }
+      .result-badge.skipped { background: #fef3c7; color: #92400e; }
 
       .ai-content-cell {
         max-width: 200px;
@@ -530,10 +538,12 @@
       .url-preview tr.url-processing { background: #dbeafe !important; }
       .url-preview tr.url-done-success { background: #d1fae5 !important; }
       .url-preview tr.url-done-fail { background: #fee2e2 !important; }
+      .url-preview tr.url-done-skipped { background: #fef3c7 !important; }
 
       .url-preview tr.url-processing td:first-child::after { content: ' ↻'; color: #2563eb; font-weight: 700; }
       .url-preview tr.url-done-success td:first-child::after { content: ' ✓'; color: #059669; font-weight: 700; }
       .url-preview tr.url-done-fail td:first-child::after { content: ' ✗'; color: #dc2626; font-weight: 700; }
+      .url-preview tr.url-done-skipped td:first-child::after { content: ' —'; color: #d97706; font-weight: 700; }
 
       /* 底部操作区 */
       .footer-actions {
@@ -722,6 +732,9 @@
           <div class="stat-item stat-fail inactive">
             <span class="num" id="failCount">0</span> 失败
           </div>
+          <div class="stat-item stat-skipped inactive">
+            <span class="num" id="skippedCount">0</span> 已存在
+          </div>
           <div class="stat-item stat-pending">
             <span class="num" id="pendingCount">0</span> 待处理
           </div>
@@ -757,6 +770,7 @@
           <select id="filterResult">
             <option value="all">全部结果</option>
             <option value="success">仅成功</option>
+            <option value="skipped">仅已存在</option>
             <option value="fail">仅失败</option>
           </select>
           <select id="filterDomain">
