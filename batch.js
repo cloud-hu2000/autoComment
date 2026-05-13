@@ -41,6 +41,11 @@ let timeoutSeconds = 60;
 // 标签打开锁（防止并发）
 let isOpeningTab = false;
 
+// 等待确认的标签页: tabId -> { urlIndex }
+let tabsPendingConfirm = new Map();
+// 需要收到 BATCH_CONFIRMED 才关闭的标签页
+let tabsWaitingClose = new Set();
+
 // ==================== DOM 引用 ====================
 const uploadZone = document.getElementById('uploadZone');
 const fileInput = document.getElementById('fileInput');
@@ -177,7 +182,13 @@ function bindEvents() {
   fileRemove.addEventListener('click', resetFile);
 
   // 操作按钮
-  startBtn.addEventListener('click', startBatch);
+  startBtn.addEventListener('click', () => {
+    if (status === 'terminated') {
+      resumeBatch();
+    } else {
+      startBatch();
+    }
+  });
   pauseBtn.addEventListener('click', togglePause);
   stopBtn.addEventListener('click', stopBatch);
   exportBtn.addEventListener('click', exportResults);
@@ -189,8 +200,9 @@ function bindEvents() {
 
   // 监听 background 消息（结果回调）
   chrome.runtime.onMessage.addListener((message) => {
-    if (message.type === 'BATCH_RESULT') {
-      handleTabResult(message.urlIndex, message.result, message.aiContent, message.errorMessage);
+    // background 通知：结果已落盘，标签页可以安全关闭了
+    if (message.type === 'BATCH_CONFIRMED') {
+      handleTabConfirmed(message.urlIndex, message.result, message.aiContent, message.errorMessage);
     }
   });
 
@@ -250,7 +262,36 @@ function normalizeEncoding(arrayBuffer) {
   if (len >= 4 && bytes[1] === 0x00 && bytes[3] === 0x00) {
     return new TextDecoder('utf-16le').decode(bytes);
   }
-  return new TextDecoder('utf-8').decode(bytes);
+
+  // 检测 GBK/GB2312 编码：中文 GBK 双字节范围 0x81-0xFE
+  let hasGBKSignature = false;
+  for (let i = 0; i < len - 1; i++) {
+    const b = bytes[i];
+    if (b >= 0x81 && b <= 0xfe) {
+      hasGBKSignature = true;
+      break;
+    }
+  }
+
+  // 优先尝试 UTF-8 解码（现代标准）
+  const utf8Text = new TextDecoder('utf-8').decode(bytes);
+
+  // 如果 UTF-8 解码后仍包含乱码特征（连续问号或方框），尝试 GBK
+  if (hasGBKSignature && (utf8Text.includes('�') || utf8Text.includes('???') || /[\x00-\x08\x0B\x0C\x0E-\x1F]/.test(utf8Text.slice(0, 100)))) {
+    try {
+      // 使用 GBK/GB2312/GB18030 解码
+      const gbkText = new TextDecoder('gbk').decode(bytes);
+      // 验证 GBK 解码结果是否包含有效中文（GBK 中常用汉字在 0xB0-0xF7 范围）
+      const validChineseCount = (gbkText.match(/[\u4e00-\u9fa5]/g) || []).length;
+      if (validChineseCount > 0) {
+        return gbkText;
+      }
+    } catch (e) {
+      // GBK 解码失败，回退到 UTF-8
+    }
+  }
+
+  return utf8Text;
 }
 
 function parseCSV(raw, fileNameParam) {
@@ -434,11 +475,21 @@ function togglePause() {
   }
 }
 
+// 终止标志：stopBatch 后保持 results 但不再处理
+let isTerminated = false;
+
 async function stopBatch() {
-  setStatus('idle');
+  // 停止继续打开新标签页
+  isTerminated = true;
+
+  // 标记所有待处理的为未处理（可用于恢复）
+  const terminatedCount = pendingCount;
+
+  // 清空轮询和超时检查
   if (pollTimer) clearTimeout(pollTimer);
   stopTimeoutChecker();
 
+  // 关闭所有打开的标签页
   const tabIds = Array.from(activeTabs.keys());
   activeTabs.clear();
   for (const tabId of tabIds) {
@@ -449,25 +500,85 @@ async function stopBatch() {
     } catch (_) {}
   }
   activeTabCount = 0;
+
+  // 状态设为 terminated，用于显示保留的结果
+  setStatus('terminated');
   updateStatsUI();
   updateUI();
+
+  // 显示终止提示
+  addLog('', 'info', `已手动终止。共保留 ${localResults.length} 条结果（成功 ${successCount}，失败 ${failCount}），跳过 ${terminatedCount} 条未处理`);
+}
+
+// 恢复处理（从终止状态继续）
+async function resumeBatch() {
+  console.log('[resumeBatch] 开始恢复处理', { status, currentIndex, totalCount, successCount, failCount });
+
+  if (status !== 'terminated') {
+    console.log('[resumeBatch] 状态不是 terminated，不执行');
+    return;
+  }
+
+  // 重置终止状态
+  isTerminated = false;
+  isOpeningTab = false;  // 重置锁，确保可以继续打开
+
+  // 重置待处理计数（仅统计还未处理的）
+  const processedCount = successCount + failCount;
+  pendingCount = totalCount - processedCount;
+
+  console.log('[resumeBatch] 将要处理的 URL 索引范围:', currentIndex, '-', totalCount - 1);
+
+  setStatus('running');
+  updateUI();
+
+  // 从断点继续打开标签页
+  const tabsToOpen = Math.min(maxConcurrentTabs, totalCount - currentIndex);
+  console.log('[resumeBatch] 将打开', tabsToOpen, '个标签页');
+
+  for (let i = 0; i < tabsToOpen; i++) {
+    console.log('[resumeBatch] 打开标签页', i, '当前索引:', currentIndex);
+    openNextTabSync();
+    // 短暂延迟让标签页有机会打开
+    await new Promise(resolve => setTimeout(resolve, 200));
+  }
 }
 
 // 立即打开下一个标签页（从本地队列获取）
 async function openNextTabSync() {
-  if (isOpeningTab) return;
+  console.log('[openNextTabSync] 调用', { isOpeningTab, status, isTerminated, currentIndex, totalCount });
+  if (isOpeningTab) {
+    console.log('[openNextTabSync] 跳过 - 正在打开中');
+    return;
+  }
   isOpeningTab = true;
   await openNextTab();
   isOpeningTab = false;
 }
 
 async function openNextTab() {
-  if (status !== 'running') return;
-  if (activeTabCount >= maxConcurrentTabs) return;
-  if (currentIndex >= totalCount) return;
+  console.log('[openNextTab] 检查条件', { status, isTerminated, activeTabCount, maxConcurrentTabs, currentIndex, totalCount });
+
+  if (status !== 'running') {
+    console.log('[openNextTab] 跳过 - 状态不是 running');
+    return;
+  }
+  if (isTerminated) {
+    console.log('[openNextTab] 跳过 - 已终止');
+    return;
+  }
+  if (activeTabCount >= maxConcurrentTabs) {
+    console.log('[openNextTab] 跳过 - 达到并发上限');
+    return;
+  }
+  if (currentIndex >= totalCount) {
+    console.log('[openNextTab] 跳过 - 索引超出范围');
+    return;
+  }
 
   const urlIndex = currentIndex;
   const { url } = parsedUrls[urlIndex];
+  console.log('[openNextTab] 准备打开标签页', { urlIndex, url });
   currentIndex++;
 
   try {
@@ -520,9 +631,12 @@ async function openNextTab() {
           urlIndex,
           url
         }).then((response) => {
+          // 收到 content.js 的响应后，记录该 tab 等待 BATCH_CONFIRMED
+          // 重要：不能立即调用 handleTabResult + 关标签，因为 background 还没落盘
+          // 等 background 发来 BATCH_CONFIRMED 后再处理（见 onMessage 里的 handleTabConfirmed）
           if (response && response.ok) {
-            handleTabResult(urlIndex, 'success', response.aiContent, null);
-            chrome.tabs.remove(tab.id, () => {});
+            tabsPendingConfirm.set(tab.id, { urlIndex });
+            tabsWaitingClose.add(tab.id);
           }
         }).catch(() => {});
       }, 1000);
@@ -584,6 +698,22 @@ function handleTabResult(urlIndex, result, aiContent, errorMessage, forcedElapse
   // 检查是否全部完成
   if (successCount + failCount >= totalCount) {
     onAllCompleted();
+  }
+}
+
+// background 通知：结果已落盘，可以安全关闭标签页了
+function handleTabConfirmed(urlIndex, result, aiContent, errorMessage) {
+  // 先处理结果
+  handleTabResult(urlIndex, result, aiContent, errorMessage);
+
+  // 再关闭标签页
+  for (const [tabId, info] of tabsPendingConfirm) {
+    if (info.urlIndex === urlIndex) {
+      tabsPendingConfirm.delete(tabId);
+      tabsWaitingClose.delete(tabId);
+      chrome.tabs.remove(tabId, () => {});
+      break;
+    }
   }
 }
 
@@ -672,7 +802,8 @@ function setStatus(s) {
     idle: '空闲',
     running: '运行中',
     paused: '已暂停',
-    completed: '已完成'
+    completed: '已完成',
+    terminated: '已终止'
   }[s] || s;
   statusBadge.className = 'status-badge ' + s;
 }
@@ -682,21 +813,40 @@ function updateUI() {
   const isRunning = status === 'running';
   const isPaused = status === 'paused';
   const isCompleted = status === 'completed';
+  const isTerminated = status === 'terminated';
 
-  startBtn.disabled = isRunning || isPaused || parsedUrls.length === 0;
+  // 开始按钮：空闲时可开始，终止时可重新开始
+  startBtn.disabled = (isRunning || isPaused) || parsedUrls.length === 0;
+  // 终止状态下显示"重新开始"，正常空闲显示"开始批量处理"
+  startBtn.textContent = isTerminated ? '▶ 重新开始' : '▶ 开始批量处理';
+
   pauseBtn.disabled = !isRunning && !isPaused;
+  pauseBtn.style.display = isTerminated ? 'none' : 'inline-flex';
   pauseBtn.textContent = isPaused ? '继续' : '暂停';
-  stopBtn.disabled = isIdle;
-  exportBtn.disabled = isIdle || localResults.length === 0;
+  stopBtn.disabled = isIdle || isTerminated;
+  stopBtn.style.display = isTerminated ? 'none' : 'inline-flex';
+
+  exportBtn.disabled = localResults.length === 0;
   clearBtn.disabled = isRunning || isPaused;
 
-  progressSection.style.display = isIdle ? 'none' : 'block';
-  logSection.style.display = isIdle ? 'none' : 'flex';
-  footerActions.style.display = isIdle ? 'none' : 'flex';
+  // 进度、实时日志、底部操作：终止状态保持显示
+  progressSection.style.display = (isIdle) ? 'none' : 'block';
+  logSection.style.display = (isIdle) ? 'none' : 'flex';
+  footerActions.style.display = (isIdle) ? 'none' : 'flex';
 
+  // 统计面板：终止状态保持显示（显示已处理的结果）
   if (isIdle) {
     statsPanel.classList.remove('visible');
     statsTableBody.innerHTML = '';
+  } else if (localResults.length > 0) {
+    statsPanel.classList.add('visible');
+    renderStatsTable();
+  }
+
+  // 终止状态下可重新开始，将待处理计数恢复
+  if (isTerminated) {
+    pendingCount = totalCount - successCount - failCount;
+    updateStatsUI();
   }
 }
 
@@ -779,6 +929,8 @@ function clearBatch() {
   currentIndex = 0;
   localResults = [];
   activeTabsByIndex.clear();
+  tabsPendingConfirm.clear();
+  tabsWaitingClose.clear();
   logList.innerHTML = '';
   statsTableBody.innerHTML = '';
   statsTotal.textContent = '0';
