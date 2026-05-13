@@ -459,12 +459,22 @@ async function openNextTab() {
       // 监听标签页关闭
       const listener = (tabId, removeInfo) => {
         if (tabId === tab.id) {
+          // 取 startTime（必须在删除前获取）
+          const startTime = activeTabs.get(tab.id)?.startTime;
           activeTabs.delete(tab.id);
           activeTabsByIndex.delete(urlIndex);
-          clearPreviewRow(urlIndex);
           activeTabCount = Math.max(0, activeTabCount - 1);
-          updateStatsUI();
           chrome.tabs.onRemoved.removeListener(listener);
+
+          // 检查是否已有结果（content.js 主动上报或超时处理过了），没有则记为手动关闭失败
+          if (!localResults.some((r) => r.originalIndex === urlIndex)) {
+            const elapsed = startTime ? Math.round((Date.now() - startTime) / 1000) : null;
+            handleTabResult(urlIndex, 'fail', null, '用户手动关闭', elapsed);
+          } else {
+            clearPreviewRow(urlIndex);
+          }
+
+          updateStatsUI();
 
           // 标签关闭后补充新标签
           if (status === 'running' && currentIndex < totalCount) {
@@ -501,17 +511,19 @@ async function openNextTab() {
 }
 
 // 处理标签页结果
-function handleTabResult(urlIndex, result, aiContent, errorMessage) {
+// elapsed 可选，外部已知的耗时直接传入（如手动关闭时），否则从 activeTabsByIndex 计算
+function handleTabResult(urlIndex, result, aiContent, errorMessage, forcedElapsed) {
   const item = parsedUrls[urlIndex];
   if (!item) return;
 
   // 避免重复处理
   if (localResults.some((r) => r.originalIndex === urlIndex)) return;
 
-  // 从记录中获取 startTime（tab 关闭后 activeTabsByIndex 已被清空）
-  const tabInfo = activeTabsByIndex.get(urlIndex);
-  const startTime = tabInfo ? tabInfo.startTime : null;
-  const elapsed = startTime ? Math.round((Date.now() - startTime) / 1000) : null;
+  let elapsed = forcedElapsed !== undefined ? forcedElapsed : null;
+  if (elapsed === null) {
+    const tabInfo = activeTabsByIndex.get(urlIndex);
+    elapsed = tabInfo ? Math.round((Date.now() - tabInfo.startTime) / 1000) : null;
+  }
 
   const resultEntry = {
     originalIndex: urlIndex,
