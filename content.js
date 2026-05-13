@@ -1022,6 +1022,16 @@
     return !!findLikelyCommentTextarea({ allowGenericFallback: false });
   }
 
+  // ====== 辅助函数 ======
+  function isClickable(el) {
+    if (!el) return false;
+    const style = window.getComputedStyle(el);
+    return el.offsetParent !== null &&
+           style.visibility !== 'hidden' &&
+           style.display !== 'none' &&
+           el.disabled !== true;
+  }
+
   // ====== 触发评论表单展开 ======
   /**
    * 查找并点击"回复"链接来展开评论表单（WordPress 等常见用法）
@@ -1052,10 +1062,16 @@
       try {
         const links = document.querySelectorAll(selector);
         for (const link of links) {
-          if (isElementClickable(link)) {
+          if (isClickable(link)) {
             console.log('[AutoComment] 点击回复链接:', selector, link.href || link.textContent);
             try {
-              link.click();
+              // 使用 MouseEvent 触发点击，兼容性更好
+              const evt = new MouseEvent('click', {
+                view: window,
+                bubbles: true,
+                cancelable: true
+              });
+              link.dispatchEvent(evt);
               await new Promise(resolve => setTimeout(resolve, 1500));
 
               // 检查是否展开了评论表单
@@ -1086,9 +1102,14 @@
     if (respondArea) {
       const innerLinks = respondArea.querySelectorAll('a');
       for (const link of innerLinks) {
-        if (isElementClickable(link)) {
+        if (isClickable(link)) {
           try {
-            link.click();
+            const evt = new MouseEvent('click', {
+              view: window,
+              bubbles: true,
+              cancelable: true
+            });
+            link.dispatchEvent(evt);
             await new Promise(resolve => setTimeout(resolve, 1000));
           } catch (e) {}
         }
@@ -1341,7 +1362,7 @@
         const text = (form.textContent || '').toLowerCase();
         const className = (form.className || '').toLowerCase();
         const id = (form.id || '').toLowerCase();
-        const action = (form.action || '').toLowerCase();
+        const action = (form.action || '').toString().toLowerCase();
 
         // WordPress 和其他评论表单关键词（增强：添加泰语关键词）
         const keywords = [
@@ -2146,14 +2167,14 @@
   // ============================================================
   //  确保评论表单所有必填字段都被正确填入，并在提交前验证
   // ============================================================
-  async function ensureAllCommentFormFieldsFilled(commentText) {
+  async function ensureAllCommentFormFieldsFilled(commentText, skipCommentValidation = false) {
     const userProfile = await getUserProfile();
     const WEBSITE = await getWebsiteUrl();
     const USERNAME = userProfile.name || '';
     const EMAIL = userProfile.email || '';
 
     console.log('[AutoComment] ===== ensureAllCommentFormFieldsFilled 开始 =====');
-    console.log('[AutoComment] 将填入 - Name:', USERNAME, '| Email:', EMAIL, '| Website:', WEBSITE);
+    console.log('[AutoComment] 将填入 - Name:', USERNAME, '| Email:', EMAIL, '| Website:', WEBSITE, '| skipComment:', skipCommentValidation);
 
     // ── 前置检查：配置缺失则直接报错，不静默失败 ─────────────────
     if (!USERNAME || !EMAIL) {
@@ -2393,10 +2414,12 @@
     const missingFields = [];
     const validationLog = {};
 
-    // 验证 comment
+    // 验证 comment（预检查时跳过，因为文案尚未生成）
     const cv = (commentTextarea.value || '').trim();
     validationLog.comment = { filled: cv.length > 0, length: cv.length };
-    if (!cv || cv.length < 5) missingFields.push('comment');
+    if (!skipCommentValidation && (!cv || cv.length < 5)) {
+      missingFields.push('comment');
+    }
 
     // 验证 name
     if (nameInput) {
@@ -3065,19 +3088,30 @@
   async function handleBatchTask(batchId, urlIndex, url, originalIndex) {
     console.log('[content] handleBatchTask 开始 >>>', { batchId, urlIndex, url, time: new Date().toISOString() });
     try {
-      console.log('[content] 1/5 等待页面加载...');
+      console.log('[content] 1/6 等待页面加载...');
       await waitForPageReady();
-      console.log('[content] 2/5 页面就绪，生成AI文案...');
-      const aiContent = await generatePromotionCopyWithQwen();
-      console.log('[content] AI文案生成完成，长度:', aiContent ? aiContent.length : 0, aiContent ? aiContent.substring(0, 80) + '...' : 'null');
-      console.log('[content] 3/5 填充表单字段...');
-      const fillResult = await ensureAllCommentFormFieldsFilled(aiContent);
-      console.log('[content] 填充结果:', fillResult);
+      console.log('[content] 2/6 检查是否已处理过...');
+      const existingResult = await checkExistingBatchResult(batchId, url, urlIndex);
+      if (existingResult) {
+        console.log('[content] 该URL已处理过，跳过AI生成，直接上报:', existingResult);
+        await reportAlreadyCommented(batchId, urlIndex, url, existingResult.aiContent);
+        return;
+      }
+      console.log('[content] 3/6 确认评论表单存在...');
+      // 预检查只验证姓名/邮箱/网站字段是否存在，不验证comment（尚未生成）
+      const fillResult = await ensureAllCommentFormFieldsFilled('', true);
       if (!fillResult.success) {
         throw new Error('表单字段缺失: ' + (fillResult.missingFields || []).join(', '));
       }
+      console.log('[content] 4/6 生成AI文案...');
+      const aiContent = await generatePromotionCopyWithQwen();
+      console.log('[content] AI文案生成完成，长度:', aiContent ? aiContent.length : 0, aiContent ? aiContent.substring(0, 80) + '...' : 'null');
+      console.log('[content] 5/6 填充表单字段...');
+      const refillResult = await ensureAllCommentFormFieldsFilled(aiContent);
+      if (!refillResult.success) {
+        throw new Error('表单填充失败: ' + (refillResult.missingFields || []).join(', '));
+      }
 
-      console.log('[content] 4/5 写入pending结果到storage...');
       // 提交前先写入 pending 结果（页面刷新后 batch.js 仍能立即读到）
       await writePendingResult(batchId, urlIndex, url, 'success', aiContent, null);
       console.log('[content] pending结果写入完成');
@@ -3086,7 +3120,7 @@
       sendBeaconReport(batchId, urlIndex, 'success', aiContent, null);
       console.log('[content] sendBeacon 已发出');
 
-      console.log('[content] 5/5 点击提交按钮...');
+      console.log('[content] 7/7 点击提交按钮...');
       const clickResult = await clickCommentSubmitButton();
       console.log('[content] 点击结果:', clickResult);
       // performClick 已等待页面跳转/隐藏（最多8秒），此时 content script 上下文仍存活
@@ -3149,6 +3183,41 @@
       };
       check();
     });
+  }
+
+  /**
+   * 检查 URL 是否已在 batchResults 中处理过
+   */
+  async function checkExistingBatchResult(batchId, url, urlIndex) {
+    return new Promise((resolve) => {
+      chrome.storage.local.get(['batchResults'], (data) => {
+        const results = data.batchResults || [];
+        // 只要这个 URL 之前成功处理过（不限 batchId），就跳过 AI 生成
+        const match = results.find(r => r.url === url && r.result === 'success');
+        resolve(match || null);
+      });
+    });
+  }
+
+  /**
+   * 上报"已存在评论"状态：跳过 AI 生成，直接写结果并通知 background
+   */
+  async function reportAlreadyCommented(batchId, urlIndex, url, aiContent) {
+    await writePendingResult(batchId, urlIndex, url, 'skipped', aiContent, 'already_commented');
+    sendBeaconReport(batchId, urlIndex, 'skipped', aiContent, 'already_commented');
+    if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+      await new Promise((resolve) => {
+        chrome.runtime.sendMessage({
+          type: 'BATCH_HANDLE_CONFIRM',
+          batchId,
+          urlIndex,
+          url: url || '',
+          aiContent: aiContent || '',
+          result: 'skipped',
+          errorMessage: 'already_commented'
+        }).then(resolve).catch(resolve);
+      });
+    }
   }
 
   /**
