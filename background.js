@@ -48,9 +48,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           errorMessage: message.errorMessage || null
         });
 
-        // 转发给 popup（batch.js）
+        // 关键：先通知 batch.js（popup）落盘已完成，batch.js 等到确认后才关闭标签页
+        // 再转发给 popup（batch.js），确保 batch.js 收到后再关 tab
         chrome.runtime.sendMessage({
-          type: 'BATCH_RESULT',
+          type: 'BATCH_CONFIRMED',
           urlIndex: message.urlIndex,
           result: message.result || 'success',
           aiContent: message.aiContent || null,
