@@ -1,0 +1,162 @@
+---
+description: Auto Register Filler 项目核心基调 - 项目概述、技术栈、架构与开发规范
+alwaysApply: true
+---
+
+# Auto Register Filler - 项目核心基调
+
+> **每次对话前请先阅读此文件。** 本文件定义了项目的整体认知基线，涵盖项目定位、技术栈、核心架构、关键文件说明及开发规范。
+
+---
+
+## 一、项目定位
+
+**Auto Register Filler**（也称 AutoComment）是一个 Chrome 浏览器扩展（Manifest V3），面向从事网站推广和外链运营的用户，提供以下核心能力：
+
+1. **自动填写注册/评论表单** - 智能识别并填充姓名、邮箱、密码、网址等字段
+2. **AI 推广文案生成** - 接入阿里云通义千问（Qwen）API，根据目标站内容生成英文推广评论
+3. **批量外链评论** - 上传 CSV 批量处理多 URL，自动发帖
+4. **积分付费体系** - 用户离线充值积分，AI 生成和批量处理均消耗积分
+
+**目标用户**: 从事 SEO 外链建设、网站推广的用户群体。
+
+注意：不要将任何博客url数据往服务器传输，解析、储存、统计的功能只储存在插件本地内存
+---
+
+## 二、技术栈
+
+| 层级 | 技术 |
+|------|------|
+| 浏览器扩展 | JavaScript, Manifest V3, Chrome Storage API |
+| 前端 UI | HTML5, CSS3（渐变、阴影等现代样式）|
+| 后端框架 | Node.js + Express.js |
+| 数据库 | MySQL（主）|
+| AI 接入 | 阿里云通义千问（dashscope SDK）|
+| CSV 解析 | Papaparse |
+| 进程管理 | PM2 |
+| 部署方案 | Vercel（API），阿里云 ECS + Nginx（自托管）|
+| 身份标识 | 浏览器指纹生成 User ID |
+
+---
+
+## 三、核心架构
+
+```
+Chrome Extension (content.js)
+       │
+       ├──► chrome.storage.sync 存储用户配置
+       │
+       ├──► 积分 API (https://jieyunsang.cn/api)
+       │       │
+       │       └──► 后端: Node.js + Express
+       │                   │
+       │                   └──► 数据库: MySQL
+       │
+       └──► 通义千问 API (dashscope)
+               │
+               └──► AI 生成的英文推广文案
+```
+
+---
+
+## 四、关键文件说明
+
+| 文件 | 规模 | 职责 |
+|------|------|------|
+| `content.js` | ~3000 行 | 扩展核心逻辑：表单识别填充、AI 文案生成、自动提交 |
+| `batch.js` | ~914 行 | 批量处理：轮询任务队列、管理多标签页、进度跟踪 |
+| `background.js` | ~90 行 | Service Worker：保证批量结果在页面刷新后持久化 |
+| `batch.html` | - | 批量处理 UI 页面 |
+| `options.html` / `options.js` | - | 用户设置页面（User ID、AI 模板、填充信息）|
+| `api/generate-copy.js` | ~130 行 | 后端：调用通义千问 API 生成推广文案 |
+| `api/batch.js` | ~248 行 | 后端：批量任务 CRUD |
+| `api/deduct-points.js` | - | 后端：积分扣减 |
+| `api/get-points.js` | - | 后端：积分查询 |
+| `server.js` | ~50 行 | Express 入口，路由挂载 |
+| `api/storage-mysql.js` | - | MySQL 数据库封装 |
+| `api/storage.js` | - | SQLite 数据库封装（备选）|
+
+---
+
+## 五、API 接口（生产环境 base: `https://jieyunsang.cn/api`）
+
+| 方法 | 端点 | 用途 |
+|------|------|------|
+| POST | `/api/generate-copy` | 调用 AI 生成推广文案 |
+| GET | `/api/get-points` | 查询用户积分 |
+| POST | `/api/deduct-points` | 扣减积分 |
+| POST | `/api/batch/create` | 创建批量任务 |
+| GET | `/api/batch/:id/next-url` | 获取下一个待处理 URL |
+| POST | `/api/batch/:id/report` | 上报处理结果 |
+| GET | `/api/batch/:id/status` | 查询批量任务状态 |
+| GET | `/api/batch/:id/export` | 导出结果 CSV |
+
+---
+
+## 六、开发规范
+
+### 6.1 扩展前端（content.js / batch.js / background.js）
+
+- 使用 Chrome Extension Manifest V3 API
+- 用户配置存储于 `chrome.storage.sync`
+- 与后端通信使用 `fetch` 调用 `https://jieyunsang.cn/api` 路径
+- Service Worker（background.js）仅负责在页面刷新后保持批量结果状态
+- 表单填充需 dispatch 原生事件（input / change），兼容 React / Vue 等框架
+- WordPress 风格评论表单使用 `wp-comment-cookies` 机制兼容处理
+
+### 6.2 后端（server.js / api/）
+
+- Express 框架，端口 3000
+- 数据库优先 MySQL，备选 SQLite
+- 积分相关接口需严格校验 User ID 与积分余额
+- 批量任务状态机：pending → processing → completed / failed
+- AI 生成超时时间默认 30 秒，超时返回错误
+
+### 6.3 部署注意事项
+
+- 生产 API 部署于阿里云 ECS
+- 自托管方案使用 PM2 管理进程 + Nginx 反向代理
+- 环境变量管理敏感信息（数据库连接、AI API Key）
+- 积分充值使用线下手动收费后+手动维护数据库的方式
+
+### 6.4 代码风格
+
+- 避免冗余注释，注释只解释不直观的意图或约束
+- 错误处理：所有 async 操作必须 try/catch
+- 日志：关键操作使用 `console.log` 便于排查
+- 不生成无意义的 hash 或非文本内容
+
+---
+
+## 七、快速上手
+
+### 安装扩展（本地开发）
+1. 打开 `chrome://extensions/`
+2. 开启「开发者模式」
+3. 点击「加载已解压的扩展程序」
+4. 选择 `autoComment-master` 目录
+
+### 启动后端（开发）
+```bash
+cd F:/autoComment-master
+npm install
+npm start          # 端口 3000
+```
+
+### 配置扩展
+1. 点击扩展图标进入 options 页面
+2. 填写分配的 User ID
+3. 配置个人信息（姓名、邮箱、密码、网址）
+4. 按需开启自动面板、自动生成等选项
+
+---
+
+## 八、相关文档
+
+- `docs/BATCH_AUTO_COMMENT_PLAN.md` - 批量评论功能技术设计文档
+- `DEPLOY.md` / `README.md` - 部署详细指南
+- `index.html` - 中英双语气隐私政策
+
+---
+
+*本文档为项目核心基调，每次新对话开始时应首先阅读并遵循其中的规范和背景信息。*
