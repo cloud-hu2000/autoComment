@@ -3121,7 +3121,7 @@
       console.error('[content] handleBatchTask 捕获错误:', err.message);
       await writePendingResult(batchId, urlIndex, url, 'fail', null, err.message || String(err));
       await reportBatchResult(batchId, urlIndex, 'fail', null, err.message || String(err), url);
-      try { window.close(); } catch (_) {}
+      // 不主动关闭窗口，等待超时自动关闭
     }
   }
 

@@ -64,8 +64,6 @@ const successCountEl = document.getElementById('successCount');
 const failCountEl = document.getElementById('failCount');
 const pendingCountEl = document.getElementById('pendingCount');
 const progressText = document.getElementById('progressText');
-const logSection = document.getElementById('logSection');
-const logList = document.getElementById('logList');
 const footerActions = document.getElementById('footerActions');
 const exportBtn = document.getElementById('exportBtn');
 const clearBtn = document.getElementById('clearBtn');
@@ -508,7 +506,7 @@ async function stopBatch() {
   updateUI();
 
   // 显示终止提示
-  addLog('', 'info', `已手动终止。共保留 ${localResults.length} 条结果（成功 ${successCount}，失败 ${failCount}），跳过 ${terminatedCount} 条未处理`);
+  console.log(`[batch] 已手动终止。共保留 ${localResults.length} 条结果（成功 ${successCount}，失败 ${failCount}），跳过 ${terminatedCount} 条未处理`);
 }
 
 // 恢复处理（从终止状态继续）
@@ -697,11 +695,9 @@ function handleTabResult(urlIndex, result, aiContent, errorMessage, forcedElapse
   if (result === 'success') {
     successCount++;
     highlightPreviewRow(urlIndex, 'success');
-    addLog(item.url, 'success', aiContent || '评论成功');
   } else {
     failCount++;
     highlightPreviewRow(urlIndex, 'fail');
-    addLog(item.url, 'fail', errorMessage || '处理失败');
   }
 
   pendingCount = totalCount - successCount - failCount;
@@ -720,24 +716,26 @@ function handleTabResult(urlIndex, result, aiContent, errorMessage, forcedElapse
 // background 通知：结果已落盘，可以安全关闭标签页了
 function handleTabConfirmed(urlIndex, result, aiContent, errorMessage) {
   console.log('[batch] handleTabConfirmed >>>', { urlIndex, result, aiContentLen: aiContent ? aiContent.length : 0, errorMessage, tabsPendingConfirmBefore: [...tabsPendingConfirm.entries()] });
-  // 先处理结果
-  handleTabResult(urlIndex, result, aiContent, errorMessage);
 
-  // 再关闭标签页
-  let closed = false;
+  // 如果已经记录过结果（标签页可能已被 onRemoved 提前关闭清理），跳过 handleTabResult
+  if (localResults.some((r) => r.originalIndex === urlIndex)) {
+    console.log('[batch] handleTabConfirmed: urlIndex', urlIndex, '已有结果，可能是标签页提前关闭，无需重复处理');
+  } else {
+    // 处理结果（更新 UI、写入 storage）
+    handleTabResult(urlIndex, result, aiContent, errorMessage);
+  }
+
+  // 查找并关闭标签页（如果还在的话）
   for (const [tabId, info] of tabsPendingConfirm) {
     if (info.urlIndex === urlIndex) {
       console.log('[batch] 关闭 tabId:', tabId, 'urlIndex:', urlIndex);
       tabsPendingConfirm.delete(tabId);
       tabsWaitingClose.delete(tabId);
       chrome.tabs.remove(tabId, () => {});
-      closed = true;
       break;
     }
   }
-  if (!closed) {
-    console.warn('[batch] handleTabConfirmed: 未找到对应的 tabId, urlIndex:', urlIndex, 'tabsPendingConfirm:', [...tabsPendingConfirm.entries()]);
-  }
+  // 找不到对应的 tabId 说明已经关闭了（用户手动关或超时自动关），无需处理
   console.log('[batch] handleTabConfirmed <<<');
 }
 
@@ -855,7 +853,6 @@ function updateUI() {
 
   // 进度、实时日志、底部操作：终止状态保持显示
   progressSection.style.display = (isIdle) ? 'none' : 'block';
-  logSection.style.display = (isIdle) ? 'none' : 'flex';
   footerActions.style.display = (isIdle) ? 'none' : 'flex';
 
   // 统计面板：终止状态保持显示（显示已处理的结果）
@@ -882,27 +879,6 @@ function updateStatsUI() {
   successCountEl.textContent = successCount;
   failCountEl.textContent = failCount;
   pendingCountEl.textContent = pendingCount;
-}
-
-function addLog(url, result, message) {
-  const item = document.createElement('div');
-  item.className = 'log-item ' + result;
-
-  const time = formatTime(new Date());
-  const shortUrl = url.length > 50 ? url.substring(0, 47) + '...' : url;
-
-  item.innerHTML = `
-    <span class="log-time">${time}</span>
-    <span class="log-result ${result}">${result === 'success' ? '✓' : '✗'}</span>
-    <span class="log-url" title="${escapeHtml(url)}">${escapeHtml(shortUrl)}</span>
-    <span class="log-message">${escapeHtml(message)}</span>
-  `;
-
-  logList.insertBefore(item, logList.firstChild);
-
-  if (logList.children.length > 200) {
-    logList.removeChild(logList.lastChild);
-  }
 }
 
 // ==================== 导出 ====================
@@ -952,10 +928,12 @@ function clearBatch() {
   totalCount = successCount = failCount = pendingCount = 0;
   currentIndex = 0;
   localResults = [];
+  activeTabs.clear();
   activeTabsByIndex.clear();
   tabsPendingConfirm.clear();
   tabsWaitingClose.clear();
-  logList.innerHTML = '';
+  isTerminated = false;
+  isOpeningTab = false;
   statsTableBody.innerHTML = '';
   statsTotal.textContent = '0';
   statsSuccess.textContent = '0';
