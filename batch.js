@@ -237,7 +237,9 @@ function parseCSV(text, fileNameParam) {
     return;
   }
 
-  const header = parseCSVLine(lines[0]);
+  // 去除 UTF-8 BOM（常见于从 Windows Excel 保存的文件）
+  const headerRaw = lines[0].replace(/^\ufeff/, '');
+  const header = parseCSVLine(headerRaw);
   const colUrl = header.findIndex((h) => h === '原URL' || h === 'URL' || h === 'url' || h === 'Url');
   const colDomain = header.findIndex((h) => h === 'URL对应域名' || h === '来源域名' || h === 'sourceDomain');
 
@@ -253,7 +255,7 @@ function parseCSV(text, fileNameParam) {
   urlPreviewBody.innerHTML = '';
 
   for (let i = 1; i < lines.length; i++) {
-    const row = parseCSVLine(lines[i]);
+    const row = parseCSVLine(lines[i].replace(/^\ufeff/, ''));
     let url = (row[colUrl] || '').trim();
     let sourceDomain = colDomain >= 0 ? (row[colDomain] || '').trim() : '';
 
