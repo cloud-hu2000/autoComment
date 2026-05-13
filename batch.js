@@ -32,6 +32,7 @@ let pollTimer = null;
 
 // 活跃标签页记录 { tabId -> { urlIndex, startTime } }
 let activeTabs = new Map();
+let activeTabsByIndex = new Map();  // urlIndex -> { urlIndex, startTime }
 
 // 定时器
 let timeoutCheckTimer = null;
@@ -69,6 +70,18 @@ const costHint = document.getElementById('costHint');
 const statusBadge = document.getElementById('statusBadge');
 const timeoutInput = document.getElementById('timeoutInput');
 const concurrentInput = document.getElementById('concurrentInput');
+const statsPanel = document.getElementById('statsPanel');
+const statsTotal = document.getElementById('statsTotal');
+const statsSuccess = document.getElementById('statsSuccess');
+const statsFail = document.getElementById('statsFail');
+const statsRate = document.getElementById('statsRate');
+const filterResult = document.getElementById('filterResult');
+const filterDomain = document.getElementById('filterDomain');
+const filterTimeRange = document.getElementById('filterTimeRange');
+const filterKeyword = document.getElementById('filterKeyword');
+const statsTableBody = document.getElementById('statsTableBody');
+const statsTableWrap = document.getElementById('statsTableWrap');
+const statsCountLabel = document.getElementById('statsCountLabel');
 
 // ==================== 初始化 ====================
 document.addEventListener('DOMContentLoaded', init);
@@ -180,6 +193,12 @@ function bindEvents() {
       handleTabResult(message.urlIndex, message.result, message.aiContent, message.errorMessage);
     }
   });
+
+  // 统计筛选器
+  filterResult.addEventListener('change', renderStats);
+  filterDomain.addEventListener('change', renderStats);
+  filterTimeRange.addEventListener('change', renderStats);
+  filterKeyword.addEventListener('input', debounce(renderStats, 300));
 }
 
 // ==================== CSV 解析 ====================
@@ -429,6 +448,11 @@ async function openNextTab() {
     chrome.tabs.create({ url, active: false }, (tab) => {
       activeTabCount++;
       activeTabs.set(tab.id, { urlIndex, startTime: Date.now() });
+      activeTabsByIndex.set(urlIndex, { urlIndex, startTime: Date.now() });
+
+      // 高亮预览表格中对应的行
+      highlightPreviewRow(urlIndex, 'processing');
+
       startTimeoutChecker();
       updateStatsUI();
 
@@ -436,6 +460,8 @@ async function openNextTab() {
       const listener = (tabId, removeInfo) => {
         if (tabId === tab.id) {
           activeTabs.delete(tab.id);
+          activeTabsByIndex.delete(urlIndex);
+          clearPreviewRow(urlIndex);
           activeTabCount = Math.max(0, activeTabCount - 1);
           updateStatsUI();
           chrome.tabs.onRemoved.removeListener(listener);
@@ -482,6 +508,11 @@ function handleTabResult(urlIndex, result, aiContent, errorMessage) {
   // 避免重复处理
   if (localResults.some((r) => r.originalIndex === urlIndex)) return;
 
+  // 从记录中获取 startTime（tab 关闭后 activeTabsByIndex 已被清空）
+  const tabInfo = activeTabsByIndex.get(urlIndex);
+  const startTime = tabInfo ? tabInfo.startTime : null;
+  const elapsed = startTime ? Math.round((Date.now() - startTime) / 1000) : null;
+
   const resultEntry = {
     originalIndex: urlIndex,
     url: item.url,
@@ -489,21 +520,25 @@ function handleTabResult(urlIndex, result, aiContent, errorMessage) {
     result: result,
     aiContent: aiContent || null,
     errorMessage: errorMessage || null,
-    timestamp: Date.now()
+    timestamp: Date.now(),
+    elapsed
   };
 
   localResults.push(resultEntry);
 
   if (result === 'success') {
     successCount++;
+    highlightPreviewRow(urlIndex, 'success');
     addLog(item.url, 'success', aiContent || '评论成功');
   } else {
     failCount++;
+    highlightPreviewRow(urlIndex, 'fail');
     addLog(item.url, 'fail', errorMessage || '处理失败');
   }
 
   pendingCount = totalCount - successCount - failCount;
   updateStatsUI();
+  renderStats();
 
   // 保存到本地存储
   saveLocalResults();
@@ -582,6 +617,7 @@ async function checkTimeouts() {
   }
   for (const { tabId, urlIndex } of toRemove) {
     activeTabs.delete(tabId);
+    activeTabsByIndex.delete(urlIndex);
     handleTabResult(urlIndex, 'fail', null, '处理超时');
     try {
       await new Promise((resolve) => {
@@ -619,6 +655,11 @@ function updateUI() {
   progressSection.style.display = isIdle ? 'none' : 'block';
   logSection.style.display = isIdle ? 'none' : 'flex';
   footerActions.style.display = isIdle ? 'none' : 'flex';
+
+  if (isIdle) {
+    statsPanel.classList.remove('visible');
+    statsTableBody.innerHTML = '';
+  }
 }
 
 function updateStatsUI() {
@@ -659,7 +700,7 @@ function exportResults() {
     return;
   }
 
-  const header = '原序号,URL,来源域名,结果,AI内容,错误信息,处理时间';
+  const header = '原序号,URL,来源域名,结果,AI内容,错误信息,处理耗时(秒),处理时间';
   const rows = localResults.map((r) => {
     const escape = (val) => {
       if (val == null) return '';
@@ -676,6 +717,7 @@ function exportResults() {
       r.result,
       escape(r.aiContent),
       escape(r.errorMessage),
+      r.elapsed != null ? r.elapsed : '',
       r.timestamp ? new Date(r.timestamp).toLocaleString() : ''
     ].join(',');
   });
@@ -698,10 +740,173 @@ function clearBatch() {
   totalCount = successCount = failCount = pendingCount = 0;
   currentIndex = 0;
   localResults = [];
+  activeTabsByIndex.clear();
   logList.innerHTML = '';
+  statsTableBody.innerHTML = '';
+  statsTotal.textContent = '0';
+  statsSuccess.textContent = '0';
+  statsFail.textContent = '0';
+  statsRate.textContent = '—';
+  statsPanel.classList.remove('visible');
+  filterDomain.innerHTML = '<option value="all">全部域名</option>';
+  filterResult.value = 'all';
+  filterTimeRange.value = 'all';
+  filterKeyword.value = '';
   setStatus('idle');
   updateUI();
   chrome.storage.local.remove(['batchLocalResults']);
+}
+
+// ==================== 统计面板 ====================
+
+// 从 parsedUrls 找到对应行（用 data-url 属性查找）
+function findPreviewRowByIndex(urlIndex) {
+  const { url } = parsedUrls[urlIndex] || {};
+  if (!url) return null;
+  const rows = urlPreviewBody.querySelectorAll('tr');
+  for (const row of rows) {
+    if (row.dataset.url === url) return row;
+  }
+  return null;
+}
+
+function highlightPreviewRow(urlIndex, state) {
+  const row = findPreviewRowByIndex(urlIndex);
+  if (!row) return;
+  row.classList.remove('url-processing', 'url-done-success', 'url-done-fail');
+  if (state === 'processing') row.classList.add('url-processing');
+  else if (state === 'success') row.classList.add('url-done-success');
+  else if (state === 'fail') row.classList.add('url-done-fail');
+}
+
+function clearPreviewRow(urlIndex) {
+  highlightPreviewRow(urlIndex, null);
+}
+
+function buildDomainOptions() {
+  const domainMap = new Map();
+  for (const r of localResults) {
+    const domain = extractDomain(r.url);
+    if (domain) domainMap.set(domain, (domainMap.get(domain) || 0) + 1);
+  }
+  const select = filterDomain;
+  // 保留第一项 "全部域名"
+  select.innerHTML = '<option value="all">全部域名</option>';
+  for (const [domain, count] of [...domainMap.entries()].sort((a, b) => b[1] - a[1])) {
+    const opt = document.createElement('option');
+    opt.value = domain;
+    opt.textContent = `${domain} (${count})`;
+    select.appendChild(opt);
+  }
+}
+
+function extractDomain(url) {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return '';
+  }
+}
+
+function filterTimeBucket(elapsedSecs) {
+  const sel = filterTimeRange.value;
+  if (sel === 'all') return true;
+  if (elapsedSecs == null) return sel === '60+';
+  if (sel === '0-5') return elapsedSecs <= 5;
+  if (sel === '5-15') return elapsedSecs > 5 && elapsedSecs <= 15;
+  if (sel === '15-30') return elapsedSecs > 15 && elapsedSecs <= 30;
+  if (sel === '30-60') return elapsedSecs > 30 && elapsedSecs <= 60;
+  if (sel === '60+') return elapsedSecs > 60;
+  return true;
+}
+
+function renderStats() {
+  if (localResults.length === 0) {
+    statsPanel.classList.remove('visible');
+    return;
+  }
+  statsPanel.classList.add('visible');
+
+  const total = localResults.length;
+  const success = localResults.filter((r) => r.result === 'success').length;
+  const fail = total - success;
+  statsTotal.textContent = total;
+  statsSuccess.textContent = success;
+  statsFail.textContent = fail;
+  statsRate.textContent = total > 0 ? Math.round((success / total) * 100) + '%' : '—';
+
+  buildDomainOptions();
+
+  const resultFilter = filterResult.value;
+  const domainFilter = filterDomain.value;
+  const kw = filterKeyword.value.trim().toLowerCase();
+
+  const filtered = localResults.filter((r) => {
+    if (resultFilter !== 'all' && r.result !== resultFilter) return false;
+    if (domainFilter !== 'all' && extractDomain(r.url) !== domainFilter) return false;
+    if (!filterTimeBucket(r.elapsed)) return false;
+    if (kw) {
+      const haystack = (r.url + ' ' + (r.aiContent || '') + ' ' + (r.errorMessage || '')).toLowerCase();
+      if (!haystack.includes(kw)) return false;
+    }
+    return true;
+  });
+
+  statsCountLabel.textContent = `显示 ${filtered.length} / ${total} 条`;
+
+  // 渲染表格（只重建 DOM，不重新请求）
+  statsTableBody.innerHTML = '';
+  for (const r of filtered) {
+    const tr = document.createElement('tr');
+    tr.className = 'url-' + r.result;
+
+    const elapsedStr = r.elapsed != null ? r.elapsed + 's' : '—';
+    const timeStr = r.timestamp ? formatTime(new Date(r.timestamp)) : '—';
+    const domain = extractDomain(r.url);
+    const shortUrl = r.url.length > 40 ? r.url.substring(0, 37) + '…' : r.url;
+
+    const aiCell = document.createElement('td');
+    if (r.aiContent) {
+      aiCell.className = 'ai-content-cell';
+      aiCell.textContent = r.aiContent;
+      aiCell.title = r.aiContent;
+      aiCell.addEventListener('click', () => {
+        aiCell.classList.toggle('expanded');
+      });
+    } else {
+      aiCell.textContent = '—';
+      aiCell.style.color = '#d1d5db';
+    }
+
+    tr.innerHTML = `
+      <td style="color:#9ca3af;width:40px;text-align:center;">${r.originalIndex + 1}</td>
+      <td style="color:#6b7280;font-size:11px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(domain)}</td>
+      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(r.url)}">${escapeHtml(shortUrl)}</td>
+      <td><span class="result-badge ${r.result}">${r.result === 'success' ? '成功' : '失败'}</span></td>
+    `;
+    tr.appendChild(aiCell);
+
+    const errCell = document.createElement('td');
+    if (r.errorMessage) {
+      errCell.className = 'error-cell';
+      errCell.textContent = r.errorMessage;
+      errCell.title = r.errorMessage;
+    } else {
+      errCell.textContent = '—';
+      errCell.style.color = '#d1d5db';
+    }
+    tr.appendChild(errCell);
+
+    tr.innerHTML += `
+      <td style="font-size:11px;color:#9ca3af;white-space:nowrap;">${elapsedStr}</td>
+      <td style="font-size:11px;color:#9ca3af;white-space:nowrap;">${timeStr}</td>
+    `;
+
+    statsTableBody.appendChild(tr);
+  }
+
+  // 滚动到最新
+  statsTableWrap.scrollTop = 0;
 }
 
 // ==================== 工具函数 ====================
@@ -733,4 +938,12 @@ function formatTime(date) {
   const m = String(date.getMinutes()).padStart(2, '0');
   const s = String(date.getSeconds()).padStart(2, '0');
   return `${h}:${m}:${s}`;
+}
+
+function debounce(fn, delay) {
+  let timer = null;
+  return function (...args) {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => fn.apply(this, args), delay);
+  };
 }

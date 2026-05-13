@@ -368,6 +368,173 @@
         flex-shrink: 0;
       }
 
+      /* 统计结果面板 */
+      .stats-panel {
+        display: none;
+        margin-top: 12px;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        overflow: hidden;
+        background: #fafafa;
+      }
+
+      .stats-panel.visible { display: block; }
+
+      .stats-summary {
+        display: flex;
+        gap: 0;
+        border-bottom: 1px solid #e5e7eb;
+      }
+
+      .stats-card {
+        flex: 1;
+        padding: 12px 14px;
+        text-align: center;
+        border-right: 1px solid #e5e7eb;
+      }
+      .stats-card:last-child { border-right: none; }
+
+      .stats-card-label {
+        font-size: 11px;
+        color: #9ca3af;
+        margin-bottom: 4px;
+        font-weight: 500;
+      }
+
+      .stats-card-value {
+        font-size: 22px;
+        font-weight: 700;
+        line-height: 1;
+      }
+
+      .stats-card-value.total { color: #374151; }
+      .stats-card-value.success { color: #059669; }
+      .stats-card-value.fail { color: #dc2626; }
+      .stats-card-value.rate { color: #2563eb; }
+
+      .stats-filter {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        background: #f9fafb;
+        border-bottom: 1px solid #e5e7eb;
+        flex-wrap: wrap;
+      }
+
+      .stats-filter input[type="text"],
+      .stats-filter select {
+        padding: 5px 10px;
+        border-radius: 6px;
+        border: 1px solid #d1d5db;
+        font-size: 12px;
+        outline: none;
+        background: #fff;
+      }
+
+      .stats-filter input[type="text"] { flex: 1; min-width: 120px; }
+      .stats-filter input[type="text"]:focus,
+      .stats-filter select:focus { border-color: #2563eb; }
+
+      .stats-filter-label {
+        font-size: 12px;
+        color: #6b7280;
+        font-weight: 500;
+        white-space: nowrap;
+      }
+
+      .stats-count-label {
+        margin-left: auto;
+        font-size: 11px;
+        color: #9ca3af;
+        white-space: nowrap;
+      }
+
+      .stats-table-wrap {
+        max-height: 320px;
+        overflow-y: auto;
+      }
+
+      .stats-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+      }
+
+      .stats-table th {
+        background: #f9fafb;
+        padding: 7px 10px;
+        text-align: left;
+        font-weight: 600;
+        color: #6b7280;
+        position: sticky;
+        top: 0;
+        z-index: 1;
+      }
+
+      .stats-table td {
+        padding: 6px 10px;
+        border-top: 1px solid #f3f4f6;
+        color: #374151;
+        vertical-align: middle;
+      }
+
+      .stats-table tr:hover td { background: #f0fdf4; }
+
+      .stats-table tr.url-pending td { background: #eff6ff; }
+      .stats-table tr.url-success td { background: #f0fdf4; }
+      .stats-table tr.url-fail td { background: #fff5f5; }
+
+      .result-badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 600;
+      }
+      .result-badge.success { background: #d1fae5; color: #065f46; }
+      .result-badge.fail { background: #fee2e2; color: #991b1b; }
+
+      .ai-content-cell {
+        max-width: 200px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        cursor: pointer;
+        color: #374151;
+        font-size: 11px;
+      }
+
+      .ai-content-cell.expanded {
+        white-space: normal;
+        word-break: break-all;
+        background: #fff;
+        border: 1px solid #d1d5db;
+        border-radius: 4px;
+        padding: 4px 6px;
+        max-height: 80px;
+        overflow-y: auto;
+        position: relative;
+        z-index: 2;
+      }
+
+      .error-cell {
+        color: #dc2626;
+        font-size: 11px;
+        max-width: 150px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .url-preview tr.url-processing { background: #dbeafe !important; }
+      .url-preview tr.url-done-success { background: #d1fae5 !important; }
+      .url-preview tr.url-done-fail { background: #fee2e2 !important; }
+
+      .url-preview tr.url-processing td:first-child::after { content: ' ↻'; color: #2563eb; font-weight: 700; }
+      .url-preview tr.url-done-success td:first-child::after { content: ' ✓'; color: #059669; font-weight: 700; }
+      .url-preview tr.url-done-fail td:first-child::after { content: ' ✗'; color: #dc2626; font-weight: 700; }
+
       /* 底部操作区 */
       .footer-actions {
         display: none;
@@ -481,8 +648,13 @@
 
       <!-- 并发数配置 -->
       <div class="card">
-        <div class="card-title">并发配置</div>
-        <div style="display:flex;align-items:center;gap:10px;">
+
+      </div>
+
+      <!-- 超时配置 -->
+      <div class="card">
+        <div class="card-title">同时打开标签页数量</div>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom: 20px;">
           <label for="concurrentInput" style="font-size:13px;font-weight:500;color:#374151;white-space:nowrap;margin:0;">同时打开标签页数量：</label>
           <input
             type="number"
@@ -494,13 +666,7 @@
           />
           <span style="font-size:12px;color:#9ca3af;">范围 1~10</span>
         </div>
-        <div class="hint" style="margin-top:6px">
-          设置批量处理时同时打开的标签页数量。标签页关闭后会立即打开新页面补充。
-        </div>
-      </div>
-
-      <!-- 超时配置 -->
-      <div class="card">
+        
         <div class="card-title">超时配置</div>
         <div style="display:flex;align-items:center;gap:10px;">
           <label for="timeoutInput" style="font-size:13px;font-weight:500;color:#374151;white-space:nowrap;margin:0;">单页处理超时时间（秒）：</label>
@@ -561,6 +727,67 @@
           <div class="stat-item" style="margin-left:auto">
             进度：<span class="num" id="progressText">0/0</span>
           </div>
+        </div>
+      </div>
+
+      <!-- 结果统计面板 -->
+      <div class="card stats-panel" id="statsPanel">
+        <div class="card-title">执行结果统计</div>
+        <div class="stats-summary">
+          <div class="stats-card">
+            <div class="stats-card-label">总数</div>
+            <div class="stats-card-value total" id="statsTotal">0</div>
+          </div>
+          <div class="stats-card">
+            <div class="stats-card-label">成功</div>
+            <div class="stats-card-value success" id="statsSuccess">0</div>
+          </div>
+          <div class="stats-card">
+            <div class="stats-card-label">失败</div>
+            <div class="stats-card-value fail" id="statsFail">0</div>
+          </div>
+          <div class="stats-card">
+            <div class="stats-card-label">成功率</div>
+            <div class="stats-card-value rate" id="statsRate">—</div>
+          </div>
+        </div>
+        <div class="stats-filter">
+          <span class="stats-filter-label">筛选：</span>
+          <select id="filterResult">
+            <option value="all">全部结果</option>
+            <option value="success">仅成功</option>
+            <option value="fail">仅失败</option>
+          </select>
+          <select id="filterDomain">
+            <option value="all">全部域名</option>
+          </select>
+          <select id="filterTimeRange">
+            <option value="all">全部时段</option>
+            <option value="0-5">≤5秒</option>
+            <option value="5-15">5~15秒</option>
+            <option value="15-30">15~30秒</option>
+            <option value="30-60">30~60秒</option>
+            <option value="60+">>60秒</option>
+          </select>
+          <input type="text" id="filterKeyword" placeholder="搜索 URL 或内容…" />
+          <span class="stats-count-label" id="statsCountLabel">显示 0 / 0 条</span>
+        </div>
+        <div class="stats-table-wrap" id="statsTableWrap">
+          <table class="stats-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>域名</th>
+                <th>目标页面</th>
+                <th>结果</th>
+                <th>AI 生成内容</th>
+                <th>错误信息</th>
+                <th>耗时</th>
+                <th>时间</th>
+              </tr>
+            </thead>
+            <tbody id="statsTableBody"></tbody>
+          </table>
         </div>
       </div>
 
