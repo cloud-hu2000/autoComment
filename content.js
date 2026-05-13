@@ -997,6 +997,142 @@
     }
   }
 
+  // ====== 滚动触发懒加载评论 ======
+  /**
+   * 滚动到页面底部触发懒加载评论，然后滚动到评论区域
+   */
+  async function scrollToTriggerCommentLoading() {
+    console.log('[AutoComment] 开始滚动触发懒加载评论...');
+
+    // 先滚动到页面底部触发可能的懒加载
+    window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    // 再向上滚动到评论区域
+    const commentArea = document.querySelector(
+      '#comments, .comments, #respond, .respond, .comment-respond, ' +
+      '.comments-area, .comment-section, #comments-section'
+    );
+    if (commentArea) {
+      console.log('[AutoComment] 找到评论区域，滚动到该位置');
+      commentArea.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      await new Promise(resolve => setTimeout(resolve, 1500));
+    }
+
+    return !!findLikelyCommentTextarea({ allowGenericFallback: false });
+  }
+
+  // ====== 触发评论表单展开 ======
+  /**
+   * 查找并点击"回复"链接来展开评论表单（WordPress 等常见用法）
+   */
+  async function triggerCommentFormExpansion() {
+    console.log('[AutoComment] 开始尝试展开评论表单...');
+
+    const replyLinkSelectors = [
+      '.comment-reply-link',
+      '.reply-link',
+      'a[href*="#respond"]',
+      'a[href*="#comment"]',
+      'a.comment-reply',
+      '.respond-link',
+      'a[rel="nofollow"][href*="respond"]',
+      // 英文关键词
+      'a:text("Reply")',
+      'a:text("Respond")',
+      'a:text("Leave a reply")',
+      'a:text("Re")',
+      // 泰语相关
+      'a:text("ตอบ")',           // ตอบ = 回复
+      'a:text("แสดงความคิดเห็น")', // แสดงความคิดเห็น = 发表评论
+      'a:text("ความคิดเห็น")',     // ความคิดเห็น = 评论
+    ];
+
+    for (const selector of replyLinkSelectors) {
+      try {
+        const links = document.querySelectorAll(selector);
+        for (const link of links) {
+          if (isElementClickable(link)) {
+            console.log('[AutoComment] 点击回复链接:', selector, link.href || link.textContent);
+            try {
+              link.click();
+              await new Promise(resolve => setTimeout(resolve, 1500));
+
+              // 检查是否展开了评论表单
+              const form = findCommentForm();
+              if (form) {
+                console.log('[AutoComment] 评论表单已展开');
+                return true;
+              }
+
+              // 检查是否有 textarea 出现
+              const ta = findLikelyCommentTextarea({ allowGenericFallback: false });
+              if (ta) {
+                console.log('[AutoComment] 找到评论 textarea');
+                return true;
+              }
+            } catch (e) {
+              console.log('[AutoComment] 点击回复链接失败:', e.message);
+            }
+          }
+        }
+      } catch (e) {
+        // 忽略无效选择器
+      }
+    }
+
+    // 尝试直接定位 #respond 并点击其中的链接
+    const respondArea = document.querySelector('#respond, .respond, .comment-respond, #comment-respond');
+    if (respondArea) {
+      const innerLinks = respondArea.querySelectorAll('a');
+      for (const link of innerLinks) {
+        if (isElementClickable(link)) {
+          try {
+            link.click();
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          } catch (e) {}
+        }
+      }
+    }
+
+    console.log('[AutoComment] 未能展开评论表单');
+    return false;
+  }
+
+  // ====== 完整触发评论流程 ======
+  /**
+   * 组合滚动 + 点击回复链接 + 等待表单加载
+   */
+  async function triggerCommentFormFlow() {
+    // 步骤1: 先尝试直接找评论表单
+    let form = findCommentForm();
+    let ta = findLikelyCommentTextarea({ allowGenericFallback: false });
+
+    if (form && ta) {
+      console.log('[AutoComment] 直接找到评论表单，无需触发');
+      return true;
+    }
+
+    // 步骤2: 滚动触发懒加载
+    const scrolled = await scrollToTriggerCommentLoading();
+    if (scrolled) {
+      console.log('[AutoComment] 滚动后找到评论表单');
+      return true;
+    }
+
+    // 步骤3: 点击回复链接展开表单
+    const expanded = await triggerCommentFormExpansion();
+    if (expanded) {
+      console.log('[AutoComment] 点击回复链接后展开表单');
+      return true;
+    }
+
+    // 步骤4: 再滚动一次并等待
+    await scrollToTriggerCommentLoading();
+
+    return !!findLikelyCommentTextarea({ allowGenericFallback: false });
+  }
+
   async function initOnPageReady() {
     // 先从 storage 恢复批处理上下文，确保 autoGeneratePromotionOnPageLoad 能识别批处理模式
     await restoreBatchContext();
@@ -1012,7 +1148,10 @@
 
     getAutoGenerateQwenOnPageLoadSetting().then((shouldAutoGenerate) => {
       if (shouldAutoGenerate) {
-        autoGeneratePromotionOnPageLoad();
+        // 先触发评论表单展开流程，再执行自动生成
+        triggerCommentFormFlow().then(() => {
+          autoGeneratePromotionOnPageLoad();
+        });
       }
     });
 
@@ -1021,6 +1160,7 @@
 
   let hasNotifiedCommentBox = false;
   let hasCheckedInitialCommentBox = false;
+  let hasTriggeredCommentFlow = false;
 
   function observeDynamicElements() {
     setTimeout(() => {
@@ -1039,11 +1179,16 @@
     }, 1000);
 
     const observer = new MutationObserver((mutations) => {
+      let shouldTriggerFlow = false;
+
+      // 检查是否有新的 textarea 或评论区域出现
       const newTextareas = document.querySelectorAll('textarea');
       if (newTextareas.length > 0 && !hasNotifiedCommentBox) {
         const hasCommentBox = !!findLikelyCommentTextarea({ allowGenericFallback: false });
         if (hasCommentBox) {
+          shouldTriggerFlow = true;
           hasNotifiedCommentBox = true;
+          console.log('[AutoComment] MutationObserver 检测到评论 textarea 出现');
           getAutoGenerateQwenOnPageLoadSetting().then((shouldAutoGenerate) => {
             if (shouldAutoGenerate && !autoGeneratedOnce) {
               autoGeneratePromotionOnPageLoad();
@@ -1051,6 +1196,51 @@
           });
         }
       }
+
+      // 检查是否有新的回复链接被添加（增强）
+      const newReplyLinks = document.querySelectorAll(
+        '.comment-reply-link:not([data-auto-comment-clicked]), ' +
+        '.reply-link:not([data-auto-comment-clicked]), ' +
+        'a[href*="#respond"]:not([data-auto-comment-clicked])'
+      );
+
+      if (newReplyLinks.length > 0 && !hasTriggeredCommentFlow) {
+        getAutoGenerateQwenOnPageLoadSetting().then((shouldAutoGenerate) => {
+          if (shouldAutoGenerate && !autoGeneratedOnce && !hasTriggeredCommentFlow) {
+            hasTriggeredCommentFlow = true;
+            console.log('[AutoComment] MutationObserver 检测到回复链接，自动触发评论流程');
+
+            // 标记已点击的链接，避免重复
+            newReplyLinks.forEach(link => {
+              link.setAttribute('data-auto-comment-clicked', 'true');
+            });
+
+            // 自动点击回复链接来展开表单
+            triggerCommentFormFlow().then(() => {
+              setTimeout(() => {
+                autoGeneratePromotionOnPageLoad();
+              }, 500);
+            });
+          }
+        });
+      }
+
+      // 检查是否有新的评论区域出现（增强）
+      const newCommentAreas = document.querySelectorAll(
+        '#respond:not([data-auto-comment-checked]), ' +
+        '.respond:not([data-auto-comment-checked]), ' +
+        '.comment-respond:not([data-auto-comment-checked])'
+      );
+
+      newCommentAreas.forEach(area => {
+        area.setAttribute('data-auto-comment-checked', 'true');
+        // 检查这个区域内是否有表单或 textarea
+        const hasForm = area.querySelector('form');
+        const hasTextarea = area.querySelector('textarea');
+        if ((hasForm || hasTextarea) && !hasNotifiedCommentBox) {
+          shouldTriggerFlow = true;
+        }
+      });
     });
 
     observer.observe(document.body, {
@@ -1128,7 +1318,12 @@
         '留言',
         '评论',
         '回复',
-        '响应'
+        '响应',
+        // 泰语相关
+        'ความคิดเห็น',     // ความคิดเห็น = 评论
+        'แสดง',           // แสดง = 显示/发表
+        'ข้อความ',        // ข้อความ = 消息/文本
+        'ตอบ',            // ตอบ = 回复
       ];
       if (keywords.some((k) => text.includes(k))) {
         commentTextareas.push(ta);
@@ -1148,7 +1343,7 @@
         const id = (form.id || '').toLowerCase();
         const action = (form.action || '').toLowerCase();
 
-        // WordPress 和其他评论表单关键词
+        // WordPress 和其他评论表单关键词（增强：添加泰语关键词）
         const keywords = [
           'deja una respuesta',
           'deja un comentario',
@@ -1168,7 +1363,13 @@
           '回复',
           'be first to comment',
           'cancel reply',
-          'logged in as'
+          'logged in as',
+          // 泰语评论相关
+          'ความคิดเห็น',         // ความคิดเห็น = 评论
+          'แสดงความคิดเห็น',    // แสดงความคิดเห็น = 发表意见
+          'ตอบกลับ',            // ตอบกลับ = 回复
+          'comment',
+          'respond',
         ];
 
         // WordPress 和其他表单选择器
@@ -1217,25 +1418,46 @@
         '.comment-list',
         '.commentarea',
         '[class*="comment-area"]',
-        '[id*="comment-area"]'
+        '[id*="comment-area"]',
+        // 增强：更多 WordPress 主题常见类名
+        '.comment-respond',
+        '#comment-respond',
+        '.wp-comments-area',
+        '.comments-area',
+        '.comment-wrapper',
+        '.entry-comments',
+        '.post-comments',
+        '.comment-body-wrapper',
+        '#comments-area',
+        // 增强：嵌套回复容器
+        '.comment-inner',
+        '.comment-content',
+        '.comment_container',
+        '#comment_container',
+        '[id*="div-comment"]',
+        '[class*="depth"]',
       ];
 
       for (const selector of commentAreaSelectors) {
-        const area = document.querySelector(selector);
-        if (area) {
-          // 在评论区域内查找所有 textarea
-          const areaTextareas = area.querySelectorAll('textarea');
-          areaTextareas.forEach(ta => {
-            if (!commentTextareas.includes(ta)) {
-              commentTextareas.push(ta);
+        try {
+          const areas = document.querySelectorAll(selector);
+          areas.forEach(area => {
+            // 在评论区域内查找所有 textarea
+            const areaTextareas = area.querySelectorAll('textarea');
+            areaTextareas.forEach(ta => {
+              if (!commentTextareas.includes(ta)) {
+                commentTextareas.push(ta);
+              }
+            });
+
+            // 如果区域在表单内，获取表单
+            const form = area.closest ? area.closest('form') : null;
+            if (form) {
+              commentForms.add(form);
             }
           });
-
-          // 如果区域在表单内，获取表单
-          const form = area.closest ? area.closest('form') : null;
-          if (form) {
-            commentForms.add(form);
-          }
+        } catch (e) {
+          // 忽略无效选择器
         }
       }
     }
