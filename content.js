@@ -3032,15 +3032,27 @@
   // 监听 background.js 中点击扩展图标发送的消息
   if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
     chrome.runtime.onMessage.addListener((message, _sender, _sendResponse) => {
+      // 就绪检测：batch.js 发 PING 确认 content.js 已注入
+      if (message && message.type === 'PING') {
+        _sendResponse({ ok: true });
+        return;
+      }
       if (message && message.type === 'TOGGLE_PROMOTE_PANEL') {
         createOrToggleQwenPanel();
       }
       // 批量处理模式：收到任务后自动执行评论流程（改为 async，等待执行结果再响应）
       if (message && message.type === 'BATCH_HANDLE') {
+        console.log('[content] 收到 BATCH_HANDLE >>>', { batchId: message.batchId, urlIndex: message.urlIndex, url: message.url, time: new Date().toISOString() });
         setBatchContext(message.batchId, message.urlIndex, message.url);
         handleBatchTask(message.batchId, message.urlIndex, message.url)
-          .then(() => _sendResponse({ ok: true, urlIndex: message.urlIndex }))
-          .catch((err) => _sendResponse({ ok: false, error: String(err) }));
+          .then(() => {
+            console.log('[content] BATCH_HANDLE 处理完成, 发送响应 {ok:true}');
+            _sendResponse({ ok: true, urlIndex: message.urlIndex });
+          })
+          .catch((err) => {
+            console.error('[content] BATCH_HANDLE 处理异常:', err);
+            _sendResponse({ ok: false, error: String(err) });
+          });
         return true;
       }
     });
@@ -3051,20 +3063,32 @@
    * 批量模式：自动完成评论流程并上报结果
    */
   async function handleBatchTask(batchId, urlIndex, url, originalIndex) {
+    console.log('[content] handleBatchTask 开始 >>>', { batchId, urlIndex, url, time: new Date().toISOString() });
     try {
+      console.log('[content] 1/5 等待页面加载...');
       await waitForPageReady();
+      console.log('[content] 2/5 页面就绪，生成AI文案...');
       const aiContent = await generatePromotionCopyWithQwen();
+      console.log('[content] AI文案生成完成，长度:', aiContent ? aiContent.length : 0, aiContent ? aiContent.substring(0, 80) + '...' : 'null');
+      console.log('[content] 3/5 填充表单字段...');
       const fillResult = await ensureAllCommentFormFieldsFilled(aiContent);
+      console.log('[content] 填充结果:', fillResult);
       if (!fillResult.success) {
         throw new Error('表单字段缺失: ' + (fillResult.missingFields || []).join(', '));
       }
 
+      console.log('[content] 4/5 写入pending结果到storage...');
       // 提交前先写入 pending 结果（页面刷新后 batch.js 仍能立即读到）
       await writePendingResult(batchId, urlIndex, url, 'success', aiContent, null);
+      console.log('[content] pending结果写入完成');
       // 用 sendBeacon 异步发后台，sendBeacon 在页面卸载前一定会发出
+      console.log('[content] 发送 sendBeacon...');
       sendBeaconReport(batchId, urlIndex, 'success', aiContent, null);
+      console.log('[content] sendBeacon 已发出');
 
+      console.log('[content] 5/5 点击提交按钮...');
       const clickResult = await clickCommentSubmitButton();
+      console.log('[content] 点击结果:', clickResult);
       // performClick 已等待页面跳转/隐藏（最多8秒），此时 content script 上下文仍存活
       // 若 timeout 说明页面未响应，算失败；否则表单已提交，记录成功
       if (!clickResult.success) {
@@ -3074,6 +3098,7 @@
       // 页面点击成功后，通知 background 再次落盘（防止刷新导致 context 丢失）
       // 这是关键：即使页面刷新，background 仍持有 batchId，能正确上报
       // 同时等待 background 响应后再返回，使 batch.js 能收到确认再关闭标签页
+      console.log('[content] 通知 background (BATCH_HANDLE_CONFIRM)...');
       if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
         await new Promise((resolve) => {
           chrome.runtime.sendMessage({
@@ -3082,10 +3107,18 @@
             urlIndex,
             url: url || '',
             aiContent
-          }).then(resolve).catch(resolve); // 即使发送失败也不阻断
+          }).then((res) => {
+            console.log('[content] background 响应:', res);
+            resolve(res);
+          }).catch((err) => {
+            console.error('[content] background 响应失败:', err);
+            resolve(null);
+          });
         });
       }
+      console.log('[content] handleBatchTask 完成 <<<', { batchId, urlIndex });
     } catch (err) {
+      console.error('[content] handleBatchTask 捕获错误:', err.message);
       await writePendingResult(batchId, urlIndex, url, 'fail', null, err.message || String(err));
       await reportBatchResult(batchId, urlIndex, 'fail', null, err.message || String(err), url);
       try { window.close(); } catch (_) {}
@@ -3122,13 +3155,17 @@
    * 将待确认结果写入 storage（页面刷新前同步落盘，batch.js 轮询可立即读到）
    */
   async function writePendingResult(batchId, urlIndex, url, result, aiContent, errorMessage) {
-    if (typeof chrome === 'undefined' || !chrome.storage) return;
+    console.log('[content] writePendingResult >>>', { batchId, urlIndex, url, result, aiContentLen: aiContent ? aiContent.length : 0, errorMessage });
+    if (typeof chrome === 'undefined' || !chrome.storage) {
+      console.warn('[content] writePendingResult: chrome.storage 不可用');
+      return;
+    }
     try {
       const data = await new Promise((resolve) => {
         chrome.storage.local.get(['batchResults', 'batchReportedUrls'], (d) => resolve(d));
       });
       const results = data.batchResults || [];
-      results.push({
+      const entry = {
         batchId,
         urlIndex,
         url: url || '',
@@ -3136,7 +3173,8 @@
         aiContent,
         errorMessage,
         timestamp: Date.now()
-      });
+      };
+      results.push(entry);
       if (results.length > 100) results.shift();
       const reported = data.batchReportedUrls || [];
       const urlKey = `${batchId}:${urlIndex}`;
@@ -3147,7 +3185,10 @@
       await new Promise((resolve) => {
         chrome.storage.local.set({ batchResults: results, batchReportedUrls: reported }, resolve);
       });
-    } catch (_) {}
+      console.log('[content] writePendingResult <<< 写入完成, 当前results长度:', results.length);
+    } catch (e) {
+      console.error('[content] writePendingResult 错误:', e);
+    }
   }
 
   /**

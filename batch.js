@@ -202,6 +202,7 @@ function bindEvents() {
   chrome.runtime.onMessage.addListener((message) => {
     // background 通知：结果已落盘，标签页可以安全关闭了
     if (message.type === 'BATCH_CONFIRMED') {
+      console.log('[batch] 收到 BATCH_CONFIRMED >>>', { urlIndex: message.urlIndex, result: message.result, aiContentLen: message.aiContent ? message.aiContent.length : 0, tabsPendingConfirm: [...tabsPendingConfirm.entries()], tabsWaitingClose: [...tabsWaitingClose], time: new Date().toISOString() });
       handleTabConfirmed(message.urlIndex, message.result, message.aiContent, message.errorMessage);
     }
   });
@@ -623,23 +624,38 @@ async function openNextTab() {
       };
       chrome.tabs.onRemoved.addListener(listener);
 
-      // 向标签页发送任务信息
-      setTimeout(() => {
-        chrome.tabs.sendMessage(tab.id, {
-          type: 'BATCH_HANDLE',
-          batchId,
-          urlIndex,
-          url
-        }).then((response) => {
-          // 收到 content.js 的响应后，记录该 tab 等待 BATCH_CONFIRMED
-          // 重要：不能立即调用 handleTabResult + 关标签，因为 background 还没落盘
-          // 等 background 发来 BATCH_CONFIRMED 后再处理（见 onMessage 里的 handleTabConfirmed）
-          if (response && response.ok) {
-            tabsPendingConfirm.set(tab.id, { urlIndex });
-            tabsWaitingClose.add(tab.id);
-          }
-        }).catch(() => {});
-      }, 1000);
+      // 等待 content script 就绪后再发送任务
+      function sendWhenReady(tabId, retries = 0) {
+        if (retries > 20) {
+          console.error('[batch] content.js 就绪超时，放弃发送, tabId:', tabId);
+          return;
+        }
+        chrome.tabs.sendMessage(tabId, { type: 'PING' }).then(() => {
+          // content.js 已就绪，发送正式任务
+          console.log('[batch] content.js 已就绪，发送 BATCH_HANDLE → tabId:', tab.id, { batchId, urlIndex, url, time: new Date().toISOString() });
+          chrome.tabs.sendMessage(tab.id, {
+            type: 'BATCH_HANDLE',
+            batchId,
+            urlIndex,
+            url
+          }).then((response) => {
+            console.log('[batch] 收到 content.js 响应:', response, 'tabId:', tab.id, 'tabsPendingConfirm:', [...tabsPendingConfirm.keys()], 'time:', new Date().toISOString());
+            if (response && response.ok) {
+              console.log('[batch] 记录 tabId', tab.id, '到 tabsPendingConfirm, 等待 BATCH_CONFIRMED...');
+              tabsPendingConfirm.set(tab.id, { urlIndex });
+              tabsWaitingClose.add(tab.id);
+            } else {
+              console.warn('[batch] content.js 响应 ok=false 或无响应:', response);
+            }
+          }).catch((err) => {
+            console.error('[batch] sendMessage BATCH_HANDLE 发送失败:', err, 'tabId:', tab.id);
+          });
+        }).catch(() => {
+          // content.js 还没注入，500ms 后重试
+          setTimeout(() => sendWhenReady(tabId, retries + 1), 500);
+        });
+      }
+      sendWhenReady(tab.id);
     });
   } catch (e) {
     console.error('[batch] openNextTab 错误:', e);
@@ -703,18 +719,26 @@ function handleTabResult(urlIndex, result, aiContent, errorMessage, forcedElapse
 
 // background 通知：结果已落盘，可以安全关闭标签页了
 function handleTabConfirmed(urlIndex, result, aiContent, errorMessage) {
+  console.log('[batch] handleTabConfirmed >>>', { urlIndex, result, aiContentLen: aiContent ? aiContent.length : 0, errorMessage, tabsPendingConfirmBefore: [...tabsPendingConfirm.entries()] });
   // 先处理结果
   handleTabResult(urlIndex, result, aiContent, errorMessage);
 
   // 再关闭标签页
+  let closed = false;
   for (const [tabId, info] of tabsPendingConfirm) {
     if (info.urlIndex === urlIndex) {
+      console.log('[batch] 关闭 tabId:', tabId, 'urlIndex:', urlIndex);
       tabsPendingConfirm.delete(tabId);
       tabsWaitingClose.delete(tabId);
       chrome.tabs.remove(tabId, () => {});
+      closed = true;
       break;
     }
   }
+  if (!closed) {
+    console.warn('[batch] handleTabConfirmed: 未找到对应的 tabId, urlIndex:', urlIndex, 'tabsPendingConfirm:', [...tabsPendingConfirm.entries()]);
+  }
+  console.log('[batch] handleTabConfirmed <<<');
 }
 
 // 保存结果到本地存储
