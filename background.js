@@ -9,10 +9,11 @@ chrome.action.onClicked.addListener((tab) => {
  */
 async function persistBatchReport(message) {
   const { batchId, urlIndex, url: pageUrl = '', result, aiContent, errorMessage } = message;
+  console.log('[background] persistBatchReport >>>', { batchId, urlIndex, url: pageUrl, result, aiContentLen: aiContent ? aiContent.length : 0, errorMessage, time: new Date().toISOString() });
 
   const data = await chrome.storage.local.get(['batchResults', 'batchReportedUrls']);
   const results = data.batchResults || [];
-  results.push({
+  const entry = {
     batchId,
     urlIndex,
     url: pageUrl,
@@ -20,7 +21,8 @@ async function persistBatchReport(message) {
     aiContent,
     errorMessage,
     timestamp: Date.now()
-  });
+  };
+  results.push(entry);
   if (results.length > 100) results.shift();
 
   let reported = data.batchReportedUrls || [];
@@ -32,11 +34,13 @@ async function persistBatchReport(message) {
   }
 
   await chrome.storage.local.set({ batchResults: results, batchReportedUrls: reported });
+  console.log('[background] persistBatchReport <<< 写入完成, 当前results长度:', results.length, 'time:', new Date().toISOString());
 }
 
 // content.js 确认评论已提交（标签页可能刷新，context 丢失，background 仍活着）
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message && message.type === 'BATCH_HANDLE_CONFIRM') {
+    console.log('[background] 收到 BATCH_HANDLE_CONFIRM >>>', { batchId: message.batchId, urlIndex: message.urlIndex, url: message.url, aiContentLen: message.aiContent ? message.aiContent.length : 0, sender: sender.tab ? sender.tab.id : 'N/A', time: new Date().toISOString() });
     (async () => {
       try {
         await persistBatchReport({
@@ -47,6 +51,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           aiContent: message.aiContent || null,
           errorMessage: message.errorMessage || null
         });
+        console.log('[background] persistBatchReport 完成，准备发送 BATCH_CONFIRMED');
 
         // 关键：先通知 batch.js（popup）落盘已完成，batch.js 等到确认后才关闭标签页
         // 再转发给 popup（batch.js），确保 batch.js 收到后再关 tab
@@ -56,10 +61,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           result: message.result || 'success',
           aiContent: message.aiContent || null,
           errorMessage: message.errorMessage || null
-        }).catch(() => {});
+        }).then(() => {
+          console.log('[background] BATCH_CONFIRMED 发送成功');
+        }).catch((e) => {
+          console.error('[background] BATCH_CONFIRMED 发送失败:', e);
+        });
 
         sendResponse({ ok: true });
+        console.log('[background] BATCH_HANDLE_CONFIRM <<< sendResponse({ok:true})');
       } catch (e) {
+        console.error('[background] BATCH_HANDLE_CONFIRM 错误:', e);
         sendResponse({ ok: false, error: String(e) });
       }
     })();
@@ -70,11 +81,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // 批量任务结果：content / batch 页 -> background 持久化
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message && message.type === 'BATCH_REPORT_RESULT') {
+    console.log('[background] 收到 BATCH_REPORT_RESULT >>>', { batchId: message.batchId, urlIndex: message.urlIndex, result: message.result, sender: sender.tab ? sender.tab.id : 'N/A', time: new Date().toISOString() });
     (async () => {
       try {
         await persistBatchReport(message);
+        console.log('[background] BATCH_REPORT_RESULT <<< sendResponse({ok:true})');
         sendResponse({ ok: true });
       } catch (e) {
+        console.error('[background] BATCH_REPORT_RESULT 错误:', e);
         sendResponse({ ok: false, error: String(e) });
       }
     })();
