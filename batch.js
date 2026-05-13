@@ -227,10 +227,34 @@ function processFile(file) {
   reader.onerror = () => {
     alert('文件读取失败');
   };
-  reader.readAsText(file);
+  reader.readAsArrayBuffer(file);
 }
 
-function parseCSV(text, fileNameParam) {
+function normalizeEncoding(arrayBuffer) {
+  const bytes = new Uint8Array(arrayBuffer);
+  const len = bytes.length;
+
+  // UTF-16 LE BOM: FF FE
+  if (len >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe) {
+    return new TextDecoder('utf-16le').decode(bytes.slice(2));
+  }
+  // UTF-16 BE BOM: FE FF
+  if (len >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) {
+    return new TextDecoder('utf-16be').decode(bytes.slice(2));
+  }
+  // UTF-8 BOM: EF BB BF（已在 TextDecoder 自动跳过，但保险起见再剥一层）
+  if (len >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+    return new TextDecoder('utf-8').decode(bytes.slice(3));
+  }
+  // 尝试检测 UTF-16 LE（无 BOM，但数据特征为每个 ASCII 后跟 00）
+  if (len >= 4 && bytes[1] === 0x00 && bytes[3] === 0x00) {
+    return new TextDecoder('utf-16le').decode(bytes);
+  }
+  return new TextDecoder('utf-8').decode(bytes);
+}
+
+function parseCSV(raw, fileNameParam) {
+  const text = normalizeEncoding(raw);
   const lines = text.split(/\r?\n/).filter((line) => line.trim());
   if (lines.length < 2) {
     alert('CSV 文件内容为空或格式错误');
@@ -238,7 +262,7 @@ function parseCSV(text, fileNameParam) {
   }
 
   // 去除 UTF-8 BOM（常见于从 Windows Excel 保存的文件）
-  const headerRaw = lines[0].replace(/^\ufeff/, '');
+  const headerRaw = lines[0];
   const header = parseCSVLine(headerRaw);
   const colUrl = header.findIndex((h) => h === '原URL' || h === 'URL' || h === 'url' || h === 'Url');
   const colDomain = header.findIndex((h) => h === 'URL对应域名' || h === '来源域名' || h === 'sourceDomain');
@@ -255,7 +279,7 @@ function parseCSV(text, fileNameParam) {
   urlPreviewBody.innerHTML = '';
 
   for (let i = 1; i < lines.length; i++) {
-    const row = parseCSVLine(lines[i].replace(/^\ufeff/, ''));
+    const row = parseCSVLine(lines[i]);
     let url = (row[colUrl] || '').trim();
     let sourceDomain = colDomain >= 0 ? (row[colDomain] || '').trim() : '';
 
