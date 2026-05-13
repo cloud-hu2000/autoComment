@@ -22,6 +22,7 @@ let initialPoints = 0;
 let totalCount = 0;
 let successCount = 0;
 let failCount = 0;
+let skippedCount = 0;
 let pendingCount = 0;
 
 // 本地结果存储
@@ -45,6 +46,8 @@ let isOpeningTab = false;
 let tabsPendingConfirm = new Map();
 // 需要收到 BATCH_CONFIRMED 才关闭的标签页
 let tabsWaitingClose = new Set();
+// 已跳过（已存在评论）的 urlIndex 记录
+let skippedIndices = new Set();
 
 // ==================== DOM 引用 ====================
 const uploadZone = document.getElementById('uploadZone');
@@ -62,6 +65,7 @@ const progressSection = document.getElementById('progressSection');
 const progressBar = document.getElementById('progressBar');
 const successCountEl = document.getElementById('successCount');
 const failCountEl = document.getElementById('failCount');
+const skippedCountEl = document.getElementById('skippedCount');
 const pendingCountEl = document.getElementById('pendingCount');
 const progressText = document.getElementById('progressText');
 const footerActions = document.getElementById('footerActions');
@@ -602,11 +606,15 @@ async function openNextTab() {
           activeTabCount = Math.max(0, activeTabCount - 1);
           chrome.tabs.onRemoved.removeListener(listener);
 
+          console.log('[batch] 标签页关闭:', { tabId, urlIndex, activeTabCount, status });
+
           // 检查是否已有结果（content.js 主动上报或超时处理过了），没有则记为手动关闭失败
           if (!localResults.some((r) => r.originalIndex === urlIndex)) {
+            console.log('[batch] 标签关闭但无结果，记为失败:', urlIndex);
             const elapsed = startTime ? Math.round((Date.now() - startTime) / 1000) : null;
             handleTabResult(urlIndex, 'fail', null, '用户手动关闭', elapsed);
           } else {
+            console.log('[batch] 标签关闭已有结果:', urlIndex);
             clearPreviewRow(urlIndex);
           }
 
@@ -616,7 +624,12 @@ async function openNextTab() {
           if (status === 'running' && currentIndex < totalCount) {
             openNextTabSync();
           } else if (status === 'running' && activeTabCount === 0) {
-            onAllCompleted();
+            // 所有标签页都已关闭，检查是否全部完成
+            const processedCount = successCount + failCount + skippedCount;
+            console.log('[batch] 所有标签关闭，检查完成状态:', { processedCount, totalCount, activeTabCount });
+            if (processedCount >= totalCount) {
+              onAllCompleted();
+            }
           }
         }
       };
@@ -667,11 +680,18 @@ async function openNextTab() {
 // 处理标签页结果
 // elapsed 可选，外部已知的耗时直接传入（如手动关闭时），否则从 activeTabsByIndex 计算
 function handleTabResult(urlIndex, result, aiContent, errorMessage, forcedElapsed) {
+  console.log('[batch] handleTabResult 被调用:', { urlIndex, result, aiContentLen: aiContent ? aiContent.length : 0, errorMessage });
   const item = parsedUrls[urlIndex];
-  if (!item) return;
+  if (!item) {
+    console.log('[batch] handleTabResult: item 不存在, urlIndex=', urlIndex);
+    return;
+  }
 
   // 避免重复处理
-  if (localResults.some((r) => r.originalIndex === urlIndex)) return;
+  if (localResults.some((r) => r.originalIndex === urlIndex)) {
+    console.log('[batch] handleTabResult: 重复调用, urlIndex=', urlIndex);
+    return;
+  }
 
   let elapsed = forcedElapsed !== undefined ? forcedElapsed : null;
   if (elapsed === null) {
@@ -695,20 +715,35 @@ function handleTabResult(urlIndex, result, aiContent, errorMessage, forcedElapse
   if (result === 'success') {
     successCount++;
     highlightPreviewRow(urlIndex, 'success');
+  } else if (result === 'skipped') {
+    skippedCount++;
+    skippedIndices.add(urlIndex);
+    highlightPreviewRow(urlIndex, 'skipped');
   } else {
     failCount++;
     highlightPreviewRow(urlIndex, 'fail');
   }
 
-  pendingCount = totalCount - successCount - failCount;
+  pendingCount = totalCount - successCount - failCount - skippedCount;
   updateStatsUI();
   renderStats();
 
   // 保存到本地存储
   saveLocalResults();
 
-  // 检查是否全部完成
-  if (successCount + failCount >= totalCount) {
+  // 检查是否全部完成（成功 + 失败 + 已跳过 >= 总数）
+  const processedCount = successCount + failCount + skippedCount;
+  console.log('[batch] handleTabResult 完成检查:', {
+    urlIndex,
+    result,
+    successCount,
+    failCount,
+    skippedCount,
+    processedCount,
+    totalCount,
+    shouldComplete: processedCount >= totalCount
+  });
+  if (processedCount >= totalCount) {
     onAllCompleted();
   }
 }
@@ -752,8 +787,25 @@ function saveLocalResults() {
 
 // 全部完成
 async function onAllCompleted() {
+  console.log('[batch] onAllCompleted 被调用!');
+  isTerminated = true;  // 防止继续打开新标签页
   setStatus('completed');
   stopTimeoutChecker();
+  if (pollTimer) {
+    clearTimeout(pollTimer);
+    pollTimer = null;
+  }
+
+  // 关闭所有剩余标签页
+  const tabIds = Array.from(activeTabs.keys());
+  activeTabs.clear();
+  activeTabsByIndex.clear();
+  activeTabCount = 0;
+  for (const tabId of tabIds) {
+    try {
+      chrome.tabs.remove(tabId, () => {});
+    } catch (_) {}
+  }
 
   // 通过积分差值计算成功/失败数（备用验证）
   let finalPoints = initialPoints;
@@ -872,12 +924,13 @@ function updateUI() {
 }
 
 function updateStatsUI() {
-  const processed = successCount + failCount;
+  const processed = successCount + failCount + skippedCount;
   const percent = totalCount > 0 ? Math.round((processed / totalCount) * 100) : 0;
   progressBar.style.width = percent + '%';
   progressText.textContent = `${processed}/${totalCount} (${percent}%)`;
   successCountEl.textContent = successCount;
   failCountEl.textContent = failCount;
+  skippedCountEl.textContent = skippedCount;
   pendingCountEl.textContent = pendingCount;
 }
 
@@ -965,10 +1018,11 @@ function findPreviewRowByIndex(urlIndex) {
 function highlightPreviewRow(urlIndex, state) {
   const row = findPreviewRowByIndex(urlIndex);
   if (!row) return;
-  row.classList.remove('url-processing', 'url-done-success', 'url-done-fail');
+  row.classList.remove('url-processing', 'url-done-success', 'url-done-fail', 'url-done-skipped');
   if (state === 'processing') row.classList.add('url-processing');
   else if (state === 'success') row.classList.add('url-done-success');
   else if (state === 'fail') row.classList.add('url-done-fail');
+  else if (state === 'skipped') row.classList.add('url-done-skipped');
 }
 
 function clearPreviewRow(urlIndex) {
@@ -1021,11 +1075,14 @@ function renderStats() {
 
   const total = localResults.length;
   const success = localResults.filter((r) => r.result === 'success').length;
-  const fail = total - success;
+  const skipped = localResults.filter((r) => r.result === 'skipped').length;
+  const fail = localResults.filter((r) => r.result === 'fail').length;
   statsTotal.textContent = total;
   statsSuccess.textContent = success;
   statsFail.textContent = fail;
-  statsRate.textContent = total > 0 ? Math.round((success / total) * 100) + '%' : '—';
+  skippedCountEl.textContent = skipped;
+  const processedRate = total > 0 ? Math.round((success / total) * 100) : 0;
+  statsRate.textContent = total > 0 ? `${processedRate}% (${skipped} 已存在)` : '—';
 
   buildDomainOptions();
 
@@ -1074,8 +1131,9 @@ function renderStats() {
       <td style="color:#9ca3af;width:40px;text-align:center;">${r.originalIndex + 1}</td>
       <td style="color:#6b7280;font-size:11px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(domain)}</td>
       <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(r.url)}">${escapeHtml(shortUrl)}</td>
-      <td><span class="result-badge ${r.result}">${r.result === 'success' ? '成功' : '失败'}</span></td>
+      <td><span class="result-badge ${r.result}">${r.result === 'success' ? '成功' : r.result === 'skipped' ? '已存在' : '失败'}</span></td>
     `;
+    tr.className = `url-${r.result}`;
     tr.appendChild(aiCell);
 
     const errCell = document.createElement('td');
