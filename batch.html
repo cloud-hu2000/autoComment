@@ -618,6 +618,27 @@
       <h1>批量外链评论</h1>
       <div class="subtitle">上传 CSV 文件，批量打开目标页面，自动发送评论并记录结果</div>
 
+      <!-- 隔离浏览器启动 -->
+      <div class="card" id="isolatedBrowserCard">
+        <div class="card-title">隔离浏览器模式</div>
+        <div class="hint warn" id="isolationModeHint" style="display:none; margin-bottom: 12px;">
+          当前已在隔离浏览器中运行
+        </div>
+        <div id="normalModeContent">
+          <p style="font-size: 13px; color: #6b7280; margin-bottom: 12px;">
+            为避免插件干扰正常浏览，建议在专用的隔离浏览器中运行此插件。<br/>
+            点击下方按钮，会生成启动命令，在新窗口中运行插件。
+          </p>
+          <button class="btn btn-secondary" id="openIsolatedBrowserBtn">
+            🔒 生成并打开隔离浏览器
+          </button>
+          <div id="isolationCommandBox" style="display:none; margin-top: 12px;">
+            <p style="font-size: 12px; color: #374151; margin-bottom: 8px;">命令已复制到剪贴板，请在终端中运行：</p>
+            <pre id="isolationCommand" style="background: #1f2937; color: #f9fafb; padding: 12px; border-radius: 8px; font-size: 12px; overflow-x: auto; white-space: pre-wrap; word-break: break-all;"></pre>
+          </div>
+        </div>
+      </div>
+
       <!-- 文件上传区 -->
       <div class="card">
         <div class="card-title">上传 CSV 文件</div>

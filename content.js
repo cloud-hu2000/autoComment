@@ -1158,25 +1158,72 @@
     // 先从 storage 恢复批处理上下文，确保 autoGeneratePromotionOnPageLoad 能识别批处理模式
     await restoreBatchContext();
 
-    fillInputs();
-    setupFormSubmitListener();
+    // 检查是否处于隔离模式
+    const isIsolatedMode = await checkIsolatedMode();
 
-    getAutoOpenQwenPanelSetting().then((shouldOpen) => {
-      if (shouldOpen) {
-        createOrToggleQwenPanel();
-      }
-    });
+    if (isIsolatedMode) {
+      // 隔离模式下，自动启用所有功能
+      console.log('[AutoComment] 隔离模式：自动启用所有功能');
+      fillInputs();
+      setupFormSubmitListener();
+      createOrToggleQwenPanel();
 
-    getAutoGenerateQwenOnPageLoadSetting().then((shouldAutoGenerate) => {
-      if (shouldAutoGenerate) {
-        // 先触发评论表单展开流程，再执行自动生成
-        triggerCommentFormFlow().then(() => {
-          autoGeneratePromotionOnPageLoad();
-        });
-      }
-    });
+      // 隔离模式下自动生成
+      triggerCommentFormFlow().then(() => {
+        autoGeneratePromotionOnPageLoad();
+      });
+    } else {
+      // 普通模式：按用户配置决定
+      fillInputs();
+      setupFormSubmitListener();
+
+      getAutoOpenQwenPanelSetting().then((shouldOpen) => {
+        if (shouldOpen) {
+          createOrToggleQwenPanel();
+        }
+      });
+
+      getAutoGenerateQwenOnPageLoadSetting().then((shouldAutoGenerate) => {
+        if (shouldAutoGenerate) {
+          triggerCommentFormFlow().then(() => {
+            autoGeneratePromotionOnPageLoad();
+          });
+        }
+      });
+    }
 
     observeDynamicElements();
+  }
+
+  // 检查是否处于隔离模式
+  function checkIsolatedMode() {
+    return new Promise((resolve) => {
+      if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) {
+        resolve(false);
+        return;
+      }
+      chrome.storage.local.get(['isolatedMode'], (result) => {
+        resolve(result.isolatedMode === true);
+      });
+    });
+  }
+
+  // 启用隔离模式（由 batch.html 调用）
+  function enableIsolatedMode() {
+    if (typeof chrome !== 'undefined' && chrome.storage) {
+      chrome.storage.local.set({ isolatedMode: true }, () => {
+        console.log('[AutoComment] 隔离模式已启用');
+      });
+    }
+  }
+
+  // 禁用隔离模式
+  function disableIsolatedMode() {
+    if (typeof chrome !== 'undefined' && chrome.storage) {
+      chrome.storage.local.set({ isolatedMode: false }, () => {
+        console.log('[AutoComment] 隔离模式已禁用');
+      });
+    }
   }
 
   let hasNotifiedCommentBox = false;

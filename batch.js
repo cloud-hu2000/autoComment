@@ -99,7 +99,21 @@ async function init() {
   await loadTimeoutSetting();
   await loadConcurrentSetting();
   bindEvents();
+  updateIsolationUI(); // 检查并更新隔离模式状态
+
+  // 如果在隔离模式，自动启用 content.js 的隔离模式
+  if (isInIsolatedMode()) {
+    enableContentIsolatedMode();
+  }
+
   updateUI();
+}
+
+// 在 content.js 隔离模式下自动启用所有功能
+function enableContentIsolatedMode() {
+  chrome.storage.local.set({ isolatedMode: true }, () => {
+    console.log('[batch] 已启用 content.js 隔离模式');
+  });
 }
 
 async function loadUserId() {
@@ -171,6 +185,100 @@ function saveConcurrentSetting() {
   }
 }
 
+// ==================== 隔离浏览器 ====================
+
+// 检测是否在隔离浏览器中运行（通过 URL 参数）
+function isInIsolatedMode() {
+  const params = new URLSearchParams(window.location.search);
+  return params.get('isolated') === '1';
+}
+
+// 生成隔离浏览器的启动 URL（带 isolated 参数）
+function getIsolatedModeUrl() {
+  const baseUrl = window.location.origin + window.location.pathname;
+  return `${baseUrl}?isolated=1`;
+}
+
+// 获取 Chrome 可执行文件路径（Windows 常见路径）
+function getChromeExecutablePaths() {
+  return [
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+    process.env.LOCALAPPDATA + '\\Google\\Chrome\\Application\\chrome.exe',
+    process.env.PROGRAMFILES + '\\Google\\Chrome\\Application\\chrome.exe'
+  ].filter(Boolean);
+}
+
+// 生成隔离浏览器启动命令
+function generateIsolationCommand() {
+  // 使用相对于扩展目录的路径
+  const profileDir = 'F:\\\\autoComment-master\\\\chrome-isolated-profile';
+  const command = `start "" "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --user-data-dir="${profileDir}" --single-process`;
+
+  return command;
+}
+
+// 检测 Chrome 是否已安装
+function detectChromePath() {
+  const possiblePaths = [
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe'
+  ];
+
+  // 返回第一个找到的路径
+  for (const path of possiblePaths) {
+    // 这里我们无法直接检测文件是否存在，返回第一个猜测的路径
+    // 实际复制到剪贴板后会提示用户在终端运行
+  }
+  return 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+}
+
+// 打开隔离浏览器
+async function openIsolatedBrowser() {
+  const chromePath = detectChromePath();
+  const profileDir = 'F:\\autoComment-master\\chrome-isolated-profile';
+  const isolatedUrl = getIsolatedModeUrl();
+
+  // 生成启动命令
+  const command = `start "" "${chromePath}" --user-data-dir="${profileDir}" "${isolatedUrl}"`;
+
+  // 复制到剪贴板
+  try {
+    await navigator.clipboard.writeText(command);
+  } catch (e) {
+    // 降级方案
+    const textarea = document.createElement('textarea');
+    textarea.value = command;
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand('copy');
+    document.body.removeChild(textarea);
+  }
+
+  // 显示命令
+  const commandBox = document.getElementById('isolationCommandBox');
+  const commandEl = document.getElementById('isolationCommand');
+  commandEl.textContent = command;
+  commandBox.style.display = 'block';
+
+  // 提示用户
+  alert('启动命令已复制到剪贴板！\n\n请在新打开的终端中粘贴运行（Ctrl+V），这会启动一个隔离的 Chrome 浏览器。\n\n在新浏览器中，插件会自动进入隔离模式，所有功能正常工作。');
+}
+
+// 更新隔离模式 UI 状态
+function updateIsolationUI() {
+  const isolationModeHint = document.getElementById('isolationModeHint');
+  const normalModeContent = document.getElementById('normalModeContent');
+
+  if (isInIsolatedMode()) {
+    isolationModeHint.style.display = 'block';
+    normalModeContent.style.display = 'none';
+  } else {
+    isolationModeHint.style.display = 'none';
+    normalModeContent.style.display = 'block';
+  }
+}
+
 // ==================== 事件绑定 ====================
 function bindEvents() {
   // 上传区域
@@ -199,6 +307,9 @@ function bindEvents() {
   // 设置
   timeoutInput.addEventListener('change', saveTimeoutSetting);
   concurrentInput.addEventListener('change', saveConcurrentSetting);
+
+  // 隔离浏览器
+  document.getElementById('openIsolatedBrowserBtn').addEventListener('click', openIsolatedBrowser);
 
   // 监听 background 消息（结果回调）
   chrome.runtime.onMessage.addListener((message) => {
