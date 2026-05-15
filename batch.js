@@ -23,6 +23,7 @@ let totalCount = 0;
 let successCount = 0;
 let failCount = 0;
 let skippedCount = 0;
+let noCommentBoxCount = 0;
 let pendingCount = 0;
 
 // 本地结果存储
@@ -66,6 +67,7 @@ const progressBar = document.getElementById('progressBar');
 const successCountEl = document.getElementById('successCount');
 const failCountEl = document.getElementById('failCount');
 const skippedCountEl = document.getElementById('skippedCount');
+const noCommentBoxCountEl = document.getElementById('statsNoCommentBox');
 const pendingCountEl = document.getElementById('pendingCount');
 const progressText = document.getElementById('progressText');
 const footerActions = document.getElementById('footerActions');
@@ -90,6 +92,15 @@ const statsTableBody = document.getElementById('statsTableBody');
 const statsTableWrap = document.getElementById('statsTableWrap');
 const statsCountLabel = document.getElementById('statsCountLabel');
 
+// 批量任务设置勾选框
+const batchAutoOpenPanel = document.getElementById('batchAutoOpenPanel');
+const batchAutoGenerate = document.getElementById('batchAutoGenerate');
+const batchAutoSubmit = document.getElementById('batchAutoSubmit');
+
+// ==================== 批量任务设置存储键 ====================
+const BATCH_SETTINGS_KEY = 'batch_task_settings';
+const BATCH_URLS_KEY = 'batch_task_urls';
+
 // ==================== 初始化 ====================
 document.addEventListener('DOMContentLoaded', init);
 
@@ -99,21 +110,8 @@ async function init() {
   await loadTimeoutSetting();
   await loadConcurrentSetting();
   bindEvents();
-  updateIsolationUI(); // 检查并更新隔离模式状态
-
-  // 如果在隔离模式，自动启用 content.js 的隔离模式
-  if (isInIsolatedMode()) {
-    enableContentIsolatedMode();
-  }
 
   updateUI();
-}
-
-// 在 content.js 隔离模式下自动启用所有功能
-function enableContentIsolatedMode() {
-  chrome.storage.local.set({ isolatedMode: true }, () => {
-    console.log('[batch] 已启用 content.js 隔离模式');
-  });
 }
 
 async function loadUserId() {
@@ -185,100 +183,6 @@ function saveConcurrentSetting() {
   }
 }
 
-// ==================== 隔离浏览器 ====================
-
-// 检测是否在隔离浏览器中运行（通过 URL 参数）
-function isInIsolatedMode() {
-  const params = new URLSearchParams(window.location.search);
-  return params.get('isolated') === '1';
-}
-
-// 生成隔离浏览器的启动 URL（带 isolated 参数）
-function getIsolatedModeUrl() {
-  const baseUrl = window.location.origin + window.location.pathname;
-  return `${baseUrl}?isolated=1`;
-}
-
-// 获取 Chrome 可执行文件路径（Windows 常见路径）
-function getChromeExecutablePaths() {
-  return [
-    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-    process.env.LOCALAPPDATA + '\\Google\\Chrome\\Application\\chrome.exe',
-    process.env.PROGRAMFILES + '\\Google\\Chrome\\Application\\chrome.exe'
-  ].filter(Boolean);
-}
-
-// 生成隔离浏览器启动命令
-function generateIsolationCommand() {
-  // 使用相对于扩展目录的路径
-  const profileDir = 'F:\\\\autoComment-master\\\\chrome-isolated-profile';
-  const command = `start "" "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --user-data-dir="${profileDir}" --single-process`;
-
-  return command;
-}
-
-// 检测 Chrome 是否已安装
-function detectChromePath() {
-  const possiblePaths = [
-    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe'
-  ];
-
-  // 返回第一个找到的路径
-  for (const path of possiblePaths) {
-    // 这里我们无法直接检测文件是否存在，返回第一个猜测的路径
-    // 实际复制到剪贴板后会提示用户在终端运行
-  }
-  return 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
-}
-
-// 打开隔离浏览器
-async function openIsolatedBrowser() {
-  const chromePath = detectChromePath();
-  const profileDir = 'F:\\autoComment-master\\chrome-isolated-profile';
-  const isolatedUrl = getIsolatedModeUrl();
-
-  // 生成启动命令
-  const command = `start "" "${chromePath}" --user-data-dir="${profileDir}" "${isolatedUrl}"`;
-
-  // 复制到剪贴板
-  try {
-    await navigator.clipboard.writeText(command);
-  } catch (e) {
-    // 降级方案
-    const textarea = document.createElement('textarea');
-    textarea.value = command;
-    document.body.appendChild(textarea);
-    textarea.select();
-    document.execCommand('copy');
-    document.body.removeChild(textarea);
-  }
-
-  // 显示命令
-  const commandBox = document.getElementById('isolationCommandBox');
-  const commandEl = document.getElementById('isolationCommand');
-  commandEl.textContent = command;
-  commandBox.style.display = 'block';
-
-  // 提示用户
-  alert('启动命令已复制到剪贴板！\n\n请在新打开的终端中粘贴运行（Ctrl+V），这会启动一个隔离的 Chrome 浏览器。\n\n在新浏览器中，插件会自动进入隔离模式，所有功能正常工作。');
-}
-
-// 更新隔离模式 UI 状态
-function updateIsolationUI() {
-  const isolationModeHint = document.getElementById('isolationModeHint');
-  const normalModeContent = document.getElementById('normalModeContent');
-
-  if (isInIsolatedMode()) {
-    isolationModeHint.style.display = 'block';
-    normalModeContent.style.display = 'none';
-  } else {
-    isolationModeHint.style.display = 'none';
-    normalModeContent.style.display = 'block';
-  }
-}
-
 // ==================== 事件绑定 ====================
 function bindEvents() {
   // 上传区域
@@ -307,9 +211,6 @@ function bindEvents() {
   // 设置
   timeoutInput.addEventListener('change', saveTimeoutSetting);
   concurrentInput.addEventListener('change', saveConcurrentSetting);
-
-  // 隔离浏览器
-  document.getElementById('openIsolatedBrowserBtn').addEventListener('click', openIsolatedBrowser);
 
   // 监听 background 消息（结果回调）
   chrome.runtime.onMessage.addListener((message) => {
@@ -548,6 +449,9 @@ async function startBatch() {
     return;
   }
 
+  // 保存批量任务设置和 URL 列表到 storage.local，供 content.js 读取
+  await saveBatchTaskSettings();
+
   initialPoints = parseInt(pointsBalance.textContent || '0', 10);
   batchId = generateUUID();
   totalCount = parsedUrls.length;
@@ -564,6 +468,37 @@ async function startBatch() {
 
   // 串行打开初始标签页
   await openNextTabConcurrently(maxConcurrentTabs);
+}
+
+// 保存批量任务设置到 storage.local
+async function saveBatchTaskSettings() {
+  return new Promise((resolve) => {
+    const settings = {
+      autoOpenPanel: batchAutoOpenPanel.checked,
+      autoGenerate: batchAutoGenerate.checked,
+      autoSubmit: batchAutoSubmit.checked,
+      savedAt: Date.now()
+    };
+    const urls = parsedUrls.map(item => item.url);
+
+    chrome.storage.local.set({
+      [BATCH_SETTINGS_KEY]: settings,
+      [BATCH_URLS_KEY]: urls
+    }, () => {
+      console.log('[batch] 批量任务设置已保存:', settings, 'URL 数量:', urls.length);
+      resolve();
+    });
+  });
+}
+
+// 清除批量任务设置
+async function clearBatchTaskSettings() {
+  return new Promise((resolve) => {
+    chrome.storage.local.remove([BATCH_SETTINGS_KEY, BATCH_URLS_KEY], () => {
+      console.log('[batch] 批量任务设置已清除');
+      resolve();
+    });
+  });
 }
 
 // 串行打开 N 个标签页（确保每个 URL 只处理一次）
@@ -638,7 +573,7 @@ async function resumeBatch() {
   isOpeningTab = false;  // 重置锁，确保可以继续打开
 
   // 重置待处理计数（仅统计还未处理的）
-  const processedCount = successCount + failCount;
+  const processedCount = successCount + failCount + skippedCount + noCommentBoxCount;
   pendingCount = totalCount - processedCount;
 
   console.log('[resumeBatch] 将要处理的 URL 索引范围:', currentIndex, '-', totalCount - 1);
@@ -736,7 +671,7 @@ async function openNextTab() {
             openNextTabSync();
           } else if (status === 'running' && activeTabCount === 0) {
             // 所有标签页都已关闭，检查是否全部完成
-            const processedCount = successCount + failCount + skippedCount;
+            const processedCount = successCount + failCount + skippedCount + noCommentBoxCount;
             console.log('[batch] 所有标签关闭，检查完成状态:', { processedCount, totalCount, activeTabCount });
             if (processedCount >= totalCount) {
               onAllCompleted();
@@ -830,20 +765,23 @@ function handleTabResult(urlIndex, result, aiContent, errorMessage, forcedElapse
     skippedCount++;
     skippedIndices.add(urlIndex);
     highlightPreviewRow(urlIndex, 'skipped');
+  } else if (result === 'no_comment_box') {
+    noCommentBoxCount++;
+    highlightPreviewRow(urlIndex, 'no_comment_box');
   } else {
     failCount++;
     highlightPreviewRow(urlIndex, 'fail');
   }
 
-  pendingCount = totalCount - successCount - failCount - skippedCount;
+  pendingCount = totalCount - successCount - failCount - skippedCount - noCommentBoxCount;
   updateStatsUI();
   renderStats();
 
   // 保存到本地存储
   saveLocalResults();
 
-  // 检查是否全部完成（成功 + 失败 + 已跳过 >= 总数）
-  const processedCount = successCount + failCount + skippedCount;
+  // 检查是否全部完成（成功 + 失败 + 已跳过 + 无评论框 >= 总数）
+  const processedCount = successCount + failCount + skippedCount + noCommentBoxCount;
   console.log('[batch] handleTabResult 完成检查:', {
     urlIndex,
     result,
@@ -1035,13 +973,14 @@ function updateUI() {
 }
 
 function updateStatsUI() {
-  const processed = successCount + failCount + skippedCount;
+  const processed = successCount + failCount + skippedCount + noCommentBoxCount;
   const percent = totalCount > 0 ? Math.round((processed / totalCount) * 100) : 0;
   progressBar.style.width = percent + '%';
   progressText.textContent = `${processed}/${totalCount} (${percent}%)`;
   successCountEl.textContent = successCount;
   failCountEl.textContent = failCount;
   skippedCountEl.textContent = skippedCount;
+  noCommentBoxCountEl.textContent = noCommentBoxCount;
   pendingCountEl.textContent = pendingCount;
 }
 
@@ -1052,7 +991,7 @@ function exportResults() {
     return;
   }
 
-  const header = '原序号,URL,来源域名,结果,AI内容,错误信息,处理耗时(秒),处理时间';
+  const header = '原序号,目标页面,结果,错误信息,AI内容,处理耗时(秒),处理时间';
   const rows = localResults.map((r) => {
     const escape = (val) => {
       if (val == null) return '';
@@ -1065,10 +1004,9 @@ function exportResults() {
     return [
       r.originalIndex + 1,
       escape(r.url),
-      escape(r.sourceDomain),
       r.result,
-      escape(r.aiContent),
       escape(r.errorMessage),
+      escape(r.aiContent),
       r.elapsed != null ? r.elapsed : '',
       r.timestamp ? new Date(r.timestamp).toLocaleString() : ''
     ].join(',');
@@ -1110,7 +1048,7 @@ function clearBatch() {
   filterKeyword.value = '';
   setStatus('idle');
   updateUI();
-  chrome.storage.local.remove(['batchLocalResults']);
+  chrome.storage.local.remove(['batchLocalResults', BATCH_SETTINGS_KEY, BATCH_URLS_KEY]);
 }
 
 // ==================== 统计面板 ====================
@@ -1188,9 +1126,11 @@ function renderStats() {
   const success = localResults.filter((r) => r.result === 'success').length;
   const skipped = localResults.filter((r) => r.result === 'skipped').length;
   const fail = localResults.filter((r) => r.result === 'fail').length;
+  const noCommentBox = localResults.filter((r) => r.result === 'no_comment_box').length;
   statsTotal.textContent = total;
   statsSuccess.textContent = success;
   statsFail.textContent = fail;
+  statsNoCommentBox.textContent = noCommentBox;
   skippedCountEl.textContent = skipped;
   const processedRate = total > 0 ? Math.round((success / total) * 100) : 0;
   statsRate.textContent = total > 0 ? `${processedRate}% (${skipped} 已存在)` : '—';
@@ -1240,12 +1180,10 @@ function renderStats() {
 
     tr.innerHTML = `
       <td style="color:#9ca3af;width:40px;text-align:center;">${r.originalIndex + 1}</td>
-      <td style="color:#6b7280;font-size:11px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(domain)}</td>
       <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(r.url)}">${escapeHtml(shortUrl)}</td>
-      <td><span class="result-badge ${r.result}">${r.result === 'success' ? '成功' : r.result === 'skipped' ? '已存在' : '失败'}</span></td>
+      <td><span class="result-badge ${r.result}">${getResultText(r.result)}</span></td>
     `;
     tr.className = `url-${r.result}`;
-    tr.appendChild(aiCell);
 
     const errCell = document.createElement('td');
     if (r.errorMessage) {
@@ -1257,6 +1195,7 @@ function renderStats() {
       errCell.style.color = '#d1d5db';
     }
     tr.appendChild(errCell);
+    tr.appendChild(aiCell);
 
     tr.innerHTML += `
       <td style="font-size:11px;color:#9ca3af;white-space:nowrap;">${elapsedStr}</td>
@@ -1285,6 +1224,16 @@ function isValidUrl(str) {
     return url.protocol === 'http:' || url.protocol === 'https:';
   } catch {
     return false;
+  }
+}
+
+function getResultText(result) {
+  switch (result) {
+    case 'success': return '成功';
+    case 'skipped': return '已存在';
+    case 'no_comment_box': return '无评论框';
+    case 'fail': return '失败';
+    default: return result;
   }
 }
 

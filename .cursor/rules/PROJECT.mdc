@@ -1,5 +1,5 @@
 ---
-description: Auto Register Filler 项目核心基调 - 项目概述、技术栈、架构与开发规范
+description: 
 alwaysApply: true
 ---
 
@@ -26,7 +26,7 @@ alwaysApply: true
 ## 二、技术栈
 
 | 层级 | 技术 |
-|------|------|
+|---|---|
 | 浏览器扩展 | JavaScript, Manifest V3, Chrome Storage API |
 | 前端 UI | HTML5, CSS3（渐变、阴影等现代样式）|
 | 后端框架 | Node.js + Express.js |
@@ -62,7 +62,7 @@ Chrome Extension (content.js)
 ## 四、关键文件说明
 
 | 文件 | 规模 | 职责 |
-|------|------|------|
+|---|---|---|
 | `content.js` | ~3000 行 | 扩展核心逻辑：表单识别填充、AI 文案生成、自动提交 |
 | `batch.js` | ~914 行 | 批量处理：轮询任务队列、管理多标签页、进度跟踪 |
 | `background.js` | ~90 行 | Service Worker：保证批量结果在页面刷新后持久化 |
@@ -81,7 +81,7 @@ Chrome Extension (content.js)
 ## 五、API 接口（生产环境 base: `https://jieyunsang.cn/api`）
 
 | 方法 | 端点 | 用途 |
-|------|------|------|
+|---|---|---|
 | POST | `/api/generate-copy` | 调用 AI 生成推广文案 |
 | GET | `/api/get-points` | 查询用户积分 |
 | POST | `/api/deduct-points` | 扣减积分 |

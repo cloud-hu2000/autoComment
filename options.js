@@ -2,12 +2,9 @@
 
 const SKILL_TEMPLATE_STORAGE_KEY = 'qwen_skill_template';
 const WEBSITE_URL_STORAGE_KEY = 'promotion_website_url';
-const AUTO_OPEN_QWEN_PANEL_KEY = 'auto_open_qwen_panel';
 const USER_NAME_STORAGE_KEY = 'auto_fill_user_name';
 const USER_EMAIL_STORAGE_KEY = 'auto_fill_user_email';
 const USER_PASSWORD_STORAGE_KEY = 'auto_fill_user_password';
-const AUTO_GENERATE_QWEN_ON_PAGE_LOAD_KEY = 'auto_generate_qwen_on_page_load';
-const AUTO_SUBMIT_COMMENT_KEY = 'auto_submit_comment';
 const USER_ID_STORAGE_KEY = 'auto_comment_user_id';
 
 // ====== 积分系统配置 ======
@@ -16,9 +13,6 @@ const POINTS_API_BASE = 'https://jieyunsang.cn/api';
 document.addEventListener('DOMContentLoaded', () => {
   const skillTemplateInput = document.getElementById('skillTemplate');
   const websiteUrlInput = document.getElementById('websiteUrl');
-  const autoOpenPanelCheckbox = document.getElementById('autoOpenPanel');
-  const autoGenerateOnLoadCheckbox = document.getElementById('autoGenerateOnLoad');
-  const autoSubmitCommentCheckbox = document.getElementById('autoSubmitComment');
   const userNameInput = document.getElementById('userName');
   const userEmailInput = document.getElementById('userEmail');
   const userPasswordInput = document.getElementById('userPassword');
@@ -32,8 +26,6 @@ document.addEventListener('DOMContentLoaded', () => {
   if (
     !skillTemplateInput ||
     !websiteUrlInput ||
-    !autoOpenPanelCheckbox ||
-    !autoGenerateOnLoadCheckbox ||
     !userNameInput ||
     !userEmailInput ||
     !userPasswordInput ||
@@ -61,13 +53,10 @@ document.addEventListener('DOMContentLoaded', () => {
       [
         SKILL_TEMPLATE_STORAGE_KEY,
         WEBSITE_URL_STORAGE_KEY,
-        AUTO_OPEN_QWEN_PANEL_KEY,
         USER_NAME_STORAGE_KEY,
         USER_EMAIL_STORAGE_KEY,
         USER_PASSWORD_STORAGE_KEY,
-        USER_ID_STORAGE_KEY,
-        AUTO_GENERATE_QWEN_ON_PAGE_LOAD_KEY,
-        AUTO_SUBMIT_COMMENT_KEY
+        USER_ID_STORAGE_KEY
       ],
     (result) => {
       if (chrome.runtime.lastError) {
@@ -82,11 +71,6 @@ document.addEventListener('DOMContentLoaded', () => {
       if (result && typeof result[WEBSITE_URL_STORAGE_KEY] === 'string') {
         websiteUrlInput.value = result[WEBSITE_URL_STORAGE_KEY];
       }
-      if (result && typeof result[AUTO_OPEN_QWEN_PANEL_KEY] === 'boolean') {
-        autoOpenPanelCheckbox.checked = result[AUTO_OPEN_QWEN_PANEL_KEY];
-      } else {
-        autoOpenPanelCheckbox.checked = true;
-      }
       if (result && typeof result[USER_NAME_STORAGE_KEY] === 'string') {
         userNameInput.value = result[USER_NAME_STORAGE_KEY];
       }
@@ -100,51 +84,19 @@ document.addEventListener('DOMContentLoaded', () => {
       if (result && typeof result[USER_ID_STORAGE_KEY] === 'string' && result[USER_ID_STORAGE_KEY]) {
         userIdInput.value = result[USER_ID_STORAGE_KEY];
       }
-      if (result && typeof result[AUTO_SUBMIT_COMMENT_KEY] === 'boolean') {
-        autoSubmitCommentCheckbox.checked = result[AUTO_SUBMIT_COMMENT_KEY];
-      }
     }
   );
 
-  // 设置：是否在页面加载时自动调用 AI 生成推广文案
-  (function initSessionAutoGenerateSetting() {
-    if (!chrome.storage || !chrome.storage.sync) {
-      if (autoGenerateOnLoadCheckbox) {
-        autoGenerateOnLoadCheckbox.checked = false;
-      }
-      return;
-    }
-    chrome.storage.sync.get([AUTO_GENERATE_QWEN_ON_PAGE_LOAD_KEY], (result) => {
-      if (chrome.runtime.lastError) {
-        console.error('读取自动生成推广文案设置失败：', chrome.runtime.lastError);
-        autoGenerateOnLoadCheckbox.checked = false;
-        return;
-      }
-      if (result && typeof result[AUTO_GENERATE_QWEN_ON_PAGE_LOAD_KEY] === 'boolean') {
-        autoGenerateOnLoadCheckbox.checked = result[AUTO_GENERATE_QWEN_ON_PAGE_LOAD_KEY];
-      } else {
-        autoGenerateOnLoadCheckbox.checked = false;
-      }
-    });
-  })();
-
   function showStatus(el, text, timeout = 1600) {
     el.textContent = text;
-    el.classList.add('visible');
-    if (timeout > 0) {
-      setTimeout(() => {
-        el.classList.remove('visible');
-      }, timeout);
-    }
+    el.style.opacity = '1';
+    setTimeout(() => {
+      el.style.opacity = '0';
+    }, timeout);
   }
-
-  // 保存 AI 语言模板、自动填表信息及按钮选项
   saveSettingsBtn.addEventListener('click', () => {
     const skillTemplate = skillTemplateInput.value.trim();
     const websiteUrl = websiteUrlInput.value.trim();
-    const autoOpenPanel = !!autoOpenPanelCheckbox.checked;
-    const autoGenerateOnLoad = !!autoGenerateOnLoadCheckbox.checked;
-    const autoSubmitComment = !!autoSubmitCommentCheckbox.checked;
     const userName = userNameInput.value.trim();
     const userEmail = userEmailInput.value.trim();
     const userPassword = userPasswordInput.value.trim();
@@ -153,12 +105,9 @@ document.addEventListener('DOMContentLoaded', () => {
       {
         [SKILL_TEMPLATE_STORAGE_KEY]: skillTemplate,
         [WEBSITE_URL_STORAGE_KEY]: websiteUrl,
-        [AUTO_OPEN_QWEN_PANEL_KEY]: autoOpenPanel,
         [USER_NAME_STORAGE_KEY]: userName,
         [USER_EMAIL_STORAGE_KEY]: userEmail,
-        [USER_PASSWORD_STORAGE_KEY]: userPassword,
-        [AUTO_GENERATE_QWEN_ON_PAGE_LOAD_KEY]: autoGenerateOnLoad,
-        [AUTO_SUBMIT_COMMENT_KEY]: autoSubmitComment
+        [USER_PASSWORD_STORAGE_KEY]: userPassword
       },
       () => {
         if (chrome.runtime.lastError) {
@@ -225,13 +174,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const ALL_STORAGE_KEYS = [
     SKILL_TEMPLATE_STORAGE_KEY,
     WEBSITE_URL_STORAGE_KEY,
-    AUTO_OPEN_QWEN_PANEL_KEY,
     USER_NAME_STORAGE_KEY,
     USER_EMAIL_STORAGE_KEY,
     USER_PASSWORD_STORAGE_KEY,
-    USER_ID_STORAGE_KEY,
-    AUTO_GENERATE_QWEN_ON_PAGE_LOAD_KEY,
-    AUTO_SUBMIT_COMMENT_KEY
+    USER_ID_STORAGE_KEY
   ];
 
   const exportConfigBtn = document.getElementById('exportConfigBtn');

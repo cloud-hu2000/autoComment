@@ -271,6 +271,38 @@
   }
 
   // ──────────────────────────────────────────────────────────────
+  //  处理 contenteditable div（如 wpDiscuz 评论框）
+  // ──────────────────────────────────────────────────────────────
+  function setValueForEditableDiv(div, value) {
+    if (!div || div.getAttribute('contenteditable') !== 'true') return;
+    
+    console.log('[AutoComment] 填充 wpDiscuz 编辑器');
+    
+    // 先清空内容
+    div.focus();
+    document.execCommand('selectAll', false, null);
+    document.execCommand('delete', false, null);
+    
+    // 设置新内容
+    div.textContent = value;
+    
+    // 触发输入事件
+    div.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+    div.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+    
+    // 尝试触发 keydown/keyup 事件
+    try {
+      div.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true }));
+      div.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, cancelable: true }));
+    } catch (_) {}
+    
+    // 触发 blur
+    div.dispatchEvent(new FocusEvent('blur', { bubbles: true, relatedTarget: null }));
+    
+    console.log('[AutoComment] wpDiscuz 编辑器填充完成，长度:', value.length);
+  }
+
+  // ──────────────────────────────────────────────────────────────
   //  强化版填值：先聚焦 → 清空 → 按字符填入 → 触发完整事件链
   //  适用于 WordPress 中使用 React/Vue 或字符级监听的主题
   // ──────────────────────────────────────────────────────────────
@@ -328,13 +360,14 @@
   const QWEN_API_BASE = 'https://jieyunsang.cn/api';
   const SKILL_TEMPLATE_STORAGE_KEY = 'qwen_skill_template';
   const WEBSITE_URL_STORAGE_KEY = 'promotion_website_url';
-  const AUTO_OPEN_QWEN_PANEL_KEY = 'auto_open_qwen_panel';
-  const AUTO_GENERATE_QWEN_ON_PAGE_LOAD_KEY = 'auto_generate_qwen_on_page_load';
-  const AUTO_SUBMIT_COMMENT_KEY = 'auto_submit_comment';
   const USER_NAME_STORAGE_KEY = 'auto_fill_user_name';
   const USER_EMAIL_STORAGE_KEY = 'auto_fill_user_email';
   const USER_PASSWORD_STORAGE_KEY = 'auto_fill_user_password';
   const USER_ID_STORAGE_KEY = 'auto_comment_user_id';
+
+  // ====== 批量任务设置（从 storage.local 读取）======
+  const BATCH_SETTINGS_KEY = 'batch_task_settings';
+  const BATCH_URLS_KEY = 'batch_task_urls';
 
   // ====== 积分系统配置 ======
   const POINTS_API_BASE = 'https://jieyunsang.cn/api';
@@ -515,126 +548,108 @@
     });
   }
 
-  // 从 chrome.storage.sync 中获取"是否自动打开浮动窗口"的设置
+  // 从 chrome.storage.local 中获取"是否自动打开浮动窗口"的设置
+  // 仅当当前 URL 在批量任务列表中时才返回 true
   function getAutoOpenQwenPanelSetting() {
     return new Promise((resolve) => {
-      if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.sync) {
-        resolve(true);
+      if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) {
+        resolve(false);
         return;
       }
-      chrome.storage.sync.get([AUTO_OPEN_QWEN_PANEL_KEY], (result) => {
+      // 同时读取设置和 URL 列表
+      chrome.storage.local.get([BATCH_SETTINGS_KEY, BATCH_URLS_KEY], (result) => {
         if (chrome.runtime && chrome.runtime.lastError) {
-          resolve(true);
+          resolve(false);
           return;
         }
-        if (!result || typeof result[AUTO_OPEN_QWEN_PANEL_KEY] === 'undefined') {
-          resolve(true);
+        const settings = result[BATCH_SETTINGS_KEY];
+        const urls = result[BATCH_URLS_KEY];
+        if (!settings || !urls || !Array.isArray(urls)) {
+          resolve(false);
           return;
         }
-        resolve(Boolean(result[AUTO_OPEN_QWEN_PANEL_KEY]));
+        // 验证当前 URL 是否在批量任务列表中
+        const currentUrl = window.location.href;
+        const isInBatch = urls.some(url => currentUrl.startsWith(url) || url.startsWith(currentUrl));
+        if (!isInBatch) {
+          resolve(false);
+          return;
+        }
+        resolve(Boolean(settings.autoOpenPanel));
       });
     });
   }
 
-  // 从 chrome.storage 中获取"是否在页面加载时自动调用 AI 生成"的设置
+  // 从 chrome.storage.local 中获取"是否在页面加载时自动调用 AI 生成"的设置
+  // 仅当当前 URL 在批量任务列表中时才返回 true
   function getAutoGenerateQwenOnPageLoadSetting() {
     return new Promise((resolve) => {
-      if (typeof chrome === 'undefined' || !chrome.storage) {
+      if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) {
         resolve(false);
         return;
       }
-
-      let storageArea = null;
-      try {
-        if (chrome.storage.sync && typeof chrome.storage.sync.get === 'function') {
-          storageArea = chrome.storage.sync;
-        } else if (chrome.storage.session && typeof chrome.storage.session.get === 'function') {
-          storageArea = chrome.storage.session;
+      chrome.storage.local.get([BATCH_SETTINGS_KEY, BATCH_URLS_KEY], (result) => {
+        if (chrome.runtime && chrome.runtime.lastError) {
+          resolve(false);
+          return;
         }
-      } catch (_e) {
-        resolve(false);
-        return;
-      }
-
-      if (!storageArea) {
-        resolve(false);
-        return;
-      }
-
-      try {
-        storageArea.get([AUTO_GENERATE_QWEN_ON_PAGE_LOAD_KEY], (result) => {
-          if (chrome.runtime && chrome.runtime.lastError) {
-            resolve(false);
-            return;
-          }
-          if (!result || typeof result[AUTO_GENERATE_QWEN_ON_PAGE_LOAD_KEY] === 'undefined') {
-            resolve(false);
-            return;
-          }
-          resolve(Boolean(result[AUTO_GENERATE_QWEN_ON_PAGE_LOAD_KEY]));
-        });
-      } catch (_e) {
-        resolve(false);
-      }
+        const settings = result[BATCH_SETTINGS_KEY];
+        const urls = result[BATCH_URLS_KEY];
+        if (!settings || !urls || !Array.isArray(urls)) {
+          resolve(false);
+          return;
+        }
+        const currentUrl = window.location.href;
+        const isInBatch = urls.some(url => currentUrl.startsWith(url) || url.startsWith(currentUrl));
+        if (!isInBatch) {
+          resolve(false);
+          return;
+        }
+        resolve(Boolean(settings.autoGenerate));
+      });
     });
   }
 
-  // 从 chrome.storage 中获取"是否自动提交评论"的设置
+  // 从 chrome.storage.local 中获取"是否自动提交评论"的设置
+  // 仅当当前 URL 在批量任务列表中时才返回 true
   function getAutoSubmitCommentSetting() {
     return new Promise((resolve) => {
       console.log('[AutoComment] getAutoSubmitCommentSetting 开始检查...');
 
-      if (typeof chrome === 'undefined' || !chrome.storage) {
-        console.log('[AutoComment] chrome 或 chrome.storage 未定义，返回 false');
+      if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) {
+        console.log('[AutoComment] chrome 或 chrome.storage.local 未定义，返回 false');
         resolve(false);
         return;
       }
 
-      let storageArea = null;
-      try {
-        if (chrome.storage.sync && typeof chrome.storage.sync.get === 'function') {
-          storageArea = chrome.storage.sync;
-          console.log('[AutoComment] 使用 storage.sync');
-        } else if (chrome.storage.session && typeof chrome.storage.session.get === 'function') {
-          storageArea = chrome.storage.session;
-          console.log('[AutoComment] storage.sync 不可用，使用 storage.session');
-        } else {
-          console.log('[AutoComment] storage.sync 和 storage.session 都不可用');
+      chrome.storage.local.get([BATCH_SETTINGS_KEY, BATCH_URLS_KEY], (result) => {
+        console.log('[AutoComment] storage.local.get 回调，result:', JSON.stringify(result));
+        if (chrome.runtime && chrome.runtime.lastError) {
+          console.log('[AutoComment] chrome.runtime.lastError 存在，返回 false');
+          resolve(false);
+          return;
         }
-      } catch (_e) {
-        console.log('[AutoComment] 尝试获取 storageArea 时出错:', _e, '，返回 false');
-        resolve(false);
-        return;
-      }
-
-      if (!storageArea) {
-        console.log('[AutoComment] storageArea 为 null，返回 false');
-        resolve(false);
-        return;
-      }
-
-      try {
-        storageArea.get([AUTO_SUBMIT_COMMENT_KEY], (result) => {
-          console.log('[AutoComment] storage.get 回调，result:', JSON.stringify(result));
-          console.log('[AutoComment] chrome.runtime.lastError:', chrome.runtime && chrome.runtime.lastError);
-          if (chrome.runtime && chrome.runtime.lastError) {
-            console.log('[AutoComment] chrome.runtime.lastError 存在，返回 false');
-            resolve(false);
-            return;
-          }
-          if (!result || typeof result[AUTO_SUBMIT_COMMENT_KEY] === 'undefined') {
-            console.log('[AutoComment] result 为空或 key 不存在，返回 false');
-            resolve(false);
-            return;
-          }
-          const val = Boolean(result[AUTO_SUBMIT_COMMENT_KEY]);
-          console.log('[AutoComment] 开关值:', val, '，返回:', val);
-          resolve(val);
-        });
-      } catch (_e) {
-        console.log('[AutoComment] storageArea.get 抛出异常:', _e, '，返回 false');
-        resolve(false);
-      }
+        const settings = result[BATCH_SETTINGS_KEY];
+        const urls = result[BATCH_URLS_KEY];
+        console.log('[AutoComment] settings:', settings, 'urls:', urls);
+        if (!settings || !urls || !Array.isArray(urls)) {
+          console.log('[AutoComment] 设置或 URL 列表无效，返回 false');
+          resolve(false);
+          return;
+        }
+        // 验证当前 URL 是否在批量任务列表中
+        const currentUrl = window.location.href;
+        const isInBatch = urls.some(url => currentUrl.startsWith(url) || url.startsWith(currentUrl));
+        console.log('[AutoComment] currentUrl:', currentUrl, 'isInBatch:', isInBatch);
+        if (!isInBatch) {
+          console.log('[AutoComment] 当前 URL 不在批量任务列表中，返回 false');
+          resolve(false);
+          return;
+        }
+        const val = Boolean(settings.autoSubmit);
+        console.log('[AutoComment] 开关值:', val);
+        resolve(val);
+      });
     });
   }
 
@@ -1058,59 +1073,100 @@
       'a:text("ความคิดเห็น")',     // ความคิดเห็น = 评论
     ];
 
-    for (const selector of replyLinkSelectors) {
+    // 遍历所有 a 标签，查找包含回复关键词的链接
+    const allLinks = Array.from(document.querySelectorAll('a'));
+    const replyLinks = [];
+    const replyKeywords = ['reply', 'respond', 'leave a reply', 're', 'ตอบ', 'แสดงความคิดเห็น', 'ความคิดเห็น'];
+    
+    // 只在评论区域内查找回复链接，避免误点广告
+    const commentAreas = [];
+    const commentAreaSelectors = [
+      '#comments', '.comments', '.comment-section', '#respond', '.respond',
+      '.comment-respond', '#comments-section', '.comments-area', '.comment-area',
+      '.wpd-thread', '#wpd-thread', '.wpdiscuz'
+    ];
+    for (const sel of commentAreaSelectors) {
       try {
-        const links = document.querySelectorAll(selector);
-        for (const link of links) {
-          if (isClickable(link)) {
-            console.log('[AutoComment] 点击回复链接:', selector, link.href || link.textContent);
-            try {
-              // 使用 MouseEvent 触发点击，兼容性更好
-              const evt = new MouseEvent('click', {
-                view: window,
-                bubbles: true,
-                cancelable: true
-              });
-              link.dispatchEvent(evt);
-              await new Promise(resolve => setTimeout(resolve, 1500));
-
-              // 检查是否展开了评论表单
-              const form = findCommentForm();
-              if (form) {
-                console.log('[AutoComment] 评论表单已展开');
-                return true;
-              }
-
-              // 检查是否有 textarea 出现
-              const ta = findLikelyCommentTextarea({ allowGenericFallback: false });
-              if (ta) {
-                console.log('[AutoComment] 找到评论 textarea');
-                return true;
-              }
-            } catch (e) {
-              console.log('[AutoComment] 点击回复链接失败:', e.message);
-            }
+        const areas = document.querySelectorAll(sel);
+        areas.forEach(area => commentAreas.push(area));
+      } catch (_) {}
+    }
+    
+    // 收集评论区域内的所有链接
+    const linksInCommentArea = new Set();
+    for (const area of commentAreas) {
+      const links = area.querySelectorAll('a');
+      links.forEach(link => linksInCommentArea.add(link));
+    }
+    
+    for (const link of allLinks) {
+      // 如果链接不在评论区域内，跳过（避免误点广告）
+      if (!linksInCommentArea.has(link)) continue;
+      
+      const text = (link.textContent || '').toLowerCase().trim();
+      const href = (link.getAttribute('href') || '').toLowerCase();
+      
+      // 只匹配明确的回复链接，避免误点
+      const isReplyLink = 
+        replyKeywords.some(kw => text.includes(kw)) ||
+        (href.includes('#respond') && !href.startsWith('http'));
+      
+      if (isReplyLink) {
+        replyLinks.push(link);
+      }
+    }
+    
+    console.log('[AutoComment] 找到回复链接数量:', replyLinks.length);
+    
+    // 依次尝试点击回复链接
+    for (const link of replyLinks) {
+      if (!isClickable(link)) continue;
+      
+      console.log('[AutoComment] 点击回复链接:', link.textContent.trim());
+      try {
+        link.click();
+        
+        // 等待评论表单展开
+        for (let wait = 0; wait < 3000; wait += 300) {
+          await new Promise(resolve => setTimeout(resolve, 300));
+          const form = findCommentForm();
+          if (form) {
+            console.log('[AutoComment] 评论表单已展开');
+            return true;
+          }
+          const ta = findLikelyCommentTextarea({ allowGenericFallback: false });
+          if (ta) {
+            console.log('[AutoComment] 找到评论 textarea');
+            return true;
           }
         }
       } catch (e) {
-        // 忽略无效选择器
+        console.log('[AutoComment] 点击回复链接失败:', e.message);
       }
     }
 
     // 尝试直接定位 #respond 并点击其中的链接
-    const respondArea = document.querySelector('#respond, .respond, .comment-respond, #comment-respond');
+    const respondArea = document.querySelector('#respond, .respond, .comment-respond, #comment-respond, .wpdiscuz');
     if (respondArea) {
+      console.log('[AutoComment] 找到评论区域');
       const innerLinks = respondArea.querySelectorAll('a');
       for (const link of innerLinks) {
         if (isClickable(link)) {
+          const text = (link.textContent || '').toLowerCase();
+          // 跳过社交分享链接，避免误点广告
+          const skipKeywords = ['share', 'facebook', 'twitter', 'email', 'print', 'pinterest', 'linkedin', 'copy link'];
+          if (skipKeywords.some(kw => text.includes(kw))) continue;
+          
           try {
-            const evt = new MouseEvent('click', {
-              view: window,
-              bubbles: true,
-              cancelable: true
-            });
-            link.dispatchEvent(evt);
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            console.log('[AutoComment] 点击评论区域内的链接:', link.textContent.trim());
+            link.click();
+            await new Promise(resolve => setTimeout(resolve, 1500));
+            
+            const form = findCommentForm();
+            if (form) {
+              console.log('[AutoComment] 评论表单已展开');
+              return true;
+            }
           } catch (e) {}
         }
       }
@@ -1158,72 +1214,24 @@
     // 先从 storage 恢复批处理上下文，确保 autoGeneratePromotionOnPageLoad 能识别批处理模式
     await restoreBatchContext();
 
-    // 检查是否处于隔离模式
-    const isIsolatedMode = await checkIsolatedMode();
+    fillInputs();
+    setupFormSubmitListener();
 
-    if (isIsolatedMode) {
-      // 隔离模式下，自动启用所有功能
-      console.log('[AutoComment] 隔离模式：自动启用所有功能');
-      fillInputs();
-      setupFormSubmitListener();
-      createOrToggleQwenPanel();
+    getAutoOpenQwenPanelSetting().then((shouldOpen) => {
+      if (shouldOpen) {
+        createOrToggleQwenPanel();
+      }
+    });
 
-      // 隔离模式下自动生成
-      triggerCommentFormFlow().then(() => {
-        autoGeneratePromotionOnPageLoad();
-      });
-    } else {
-      // 普通模式：按用户配置决定
-      fillInputs();
-      setupFormSubmitListener();
-
-      getAutoOpenQwenPanelSetting().then((shouldOpen) => {
-        if (shouldOpen) {
-          createOrToggleQwenPanel();
-        }
-      });
-
-      getAutoGenerateQwenOnPageLoadSetting().then((shouldAutoGenerate) => {
-        if (shouldAutoGenerate) {
-          triggerCommentFormFlow().then(() => {
-            autoGeneratePromotionOnPageLoad();
-          });
-        }
-      });
-    }
+    getAutoGenerateQwenOnPageLoadSetting().then((shouldAutoGenerate) => {
+      if (shouldAutoGenerate) {
+        triggerCommentFormFlow().then(() => {
+          autoGeneratePromotionOnPageLoad();
+        });
+      }
+    });
 
     observeDynamicElements();
-  }
-
-  // 检查是否处于隔离模式
-  function checkIsolatedMode() {
-    return new Promise((resolve) => {
-      if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) {
-        resolve(false);
-        return;
-      }
-      chrome.storage.local.get(['isolatedMode'], (result) => {
-        resolve(result.isolatedMode === true);
-      });
-    });
-  }
-
-  // 启用隔离模式（由 batch.html 调用）
-  function enableIsolatedMode() {
-    if (typeof chrome !== 'undefined' && chrome.storage) {
-      chrome.storage.local.set({ isolatedMode: true }, () => {
-        console.log('[AutoComment] 隔离模式已启用');
-      });
-    }
-  }
-
-  // 禁用隔离模式
-  function disableIsolatedMode() {
-    if (typeof chrome !== 'undefined' && chrome.storage) {
-      chrome.storage.local.set({ isolatedMode: false }, () => {
-        console.log('[AutoComment] 隔离模式已禁用');
-      });
-    }
   }
 
   let hasNotifiedCommentBox = false;
@@ -1333,6 +1341,27 @@
     const commentTextareas = [];
     const commentForms = new Set();
 
+    // 方法0: 检测 wpDiscuz 可编辑 div（ contenteditable 评论框）
+    const wpDiscuzEditor = findWpDiscuzEditor();
+    if (wpDiscuzEditor) {
+      console.log('[AutoComment] 找到 wpDiscuz 编辑器:', wpDiscuzEditor.className);
+      const form = wpDiscuzEditor.closest('form');
+      if (form) {
+        commentForms.add(form);
+      }
+      // 返回一个兼容对象，模拟 textarea
+      return {
+        _isWpDiscuz: true,
+        _realElement: wpDiscuzEditor,
+        get value() { return this._realElement.textContent || ''; },
+        set value(v) { this._realElement.textContent = v; },
+        form: form,
+        closest: wpDiscuzEditor.closest.bind(wpDiscuzEditor),
+        querySelector: wpDiscuzEditor.querySelector.bind(wpDiscuzEditor),
+        querySelectorAll: wpDiscuzEditor.querySelectorAll.bind(wpDiscuzEditor)
+      };
+    }
+
     // 方法1: 通过标准的 WordPress/comment 选择器直接查找
     const standardSelectors = [
       '#comment',
@@ -1392,6 +1421,12 @@
         'แสดง',           // แสดง = 显示/发表
         'ข้อความ',        // ข้อความ = 消息/文本
         'ตอบ',            // ตอบ = 回复
+        // 英语通用评论关键词
+        'leave a comment',
+        'write a comment',
+        'post a comment',
+        'cancel reply',
+        'subscribe',
       ];
       if (keywords.some((k) => text.includes(k))) {
         commentTextareas.push(ta);
@@ -1411,7 +1446,7 @@
         const id = (form.id || '').toLowerCase();
         const action = (form.action || '').toString().toLowerCase();
 
-        // WordPress 和其他评论表单关键词（增强：添加泰语关键词）
+        // WordPress 和其他评论表单关键词（增强：添加泰语/葡萄牙语/西班牙语关键词）
         const keywords = [
           'deja una respuesta',
           'deja un comentario',
@@ -1436,8 +1471,60 @@
           'ความคิดเห็น',         // ความคิดเห็น = 评论
           'แสดงความคิดเห็น',    // แสดงความคิดเห็น = 发表意见
           'ตอบกลับ',            // ตอบกลับ = 回复
-          'comment',
-          'respond',
+          // 葡萄牙语评论相关
+          'deixe um comentário',
+          'deixe um comentario',
+          'deixe um comentário',
+          'comentário',
+          'comentario',
+          'seu nome',
+          'seu email',
+          'seu comentário',
+          'seu comentario',
+          'enviar comentário',
+          'enviar comentario',
+          'required fields',
+          'campos obrigatórios',
+          'campos obligatorios',
+          'endereço de email',
+          'endereço não será publicado',
+          // 西班牙语评论相关
+          'dejar un comentario',
+          'tu nombre',
+          'tu correo',
+          'tu comentario',
+          'enviar comentario',
+          'campos requeridos',
+          // Contact Form 7 通用关键词
+          'your name',
+          'your e-mail',
+          'your email',
+          'your message',
+          'your subject',
+          'subject:',
+          'e-mail address',
+          'email address',
+          'phone',
+          'tel:',
+          'send',
+          'submit',
+          'send message',
+          'send inquiry',
+          'book',
+          'order',
+          'inquiry',
+          'contact form',
+          'Save my name',
+          'will not be published',
+          'required fields',
+          'fields are marked',
+          // SyncedReview 等站点的评论按钮文本
+          'post comment',
+          'leave a reply',
+          'add comment',
+          'follow-up comments',
+          'new posts by email',
+          'new comments'
         ];
 
         // WordPress 和其他表单选择器
@@ -1452,7 +1539,13 @@
           '[class*="comment-form"]',
           '[id*="comment-form"]',
           '[class*="respond"]',
-          '[id*="respond"]'
+          '[id*="respond"]',
+          'form[action*="comment"]',
+          'form[id*="comment"]',
+          'form[class*="comment"]',
+          // SyncedReview 等站点
+          'form[action=""]',
+          'form[action="/wp-comments-post.php"]'
         ];
 
         const isWordPressForm = formSelectors.some(sel => {
@@ -1504,6 +1597,18 @@
         '#comment_container',
         '[id*="div-comment"]',
         '[class*="depth"]',
+        // 葡萄牙语/西班牙语评论区域
+        '.comentarios',
+        '#comentarios',
+        '.comentario',
+        '#comentario',
+        '[class*="comentario"]',
+        '.deixe-comentario',
+        '.deixe-um-comentario',
+        '.dejar-comentario',
+        '.dejar-un-comentario',
+        '.comentarios-section',
+        '.post-comments-area'
       ];
 
       for (const selector of commentAreaSelectors) {
@@ -1585,8 +1690,64 @@
     return resolveCommentFormAndSubmitButton().button;
   }
 
+  /**
+   * 查找 wpDiscuz 可编辑 div 评论框
+   */
+  function findWpDiscuzEditor() {
+    // wpDiscuz 常用选择器
+    const selectors = [
+      '.wpdiscuz-comment-text-wrap',
+      '.wpd-form-input',
+      '.wpd-form-field',
+      'div[id*="wpdiscuz"]',
+      'div[class*="wpdiscuz"]',
+      '[contenteditable="true"]'
+    ];
+    
+    for (const sel of selectors) {
+      try {
+        const editors = document.querySelectorAll(sel);
+        for (const editor of editors) {
+          // 检查是否是可编辑的评论框
+          const isEditable = editor.getAttribute('contenteditable') === 'true' || 
+                           editor.className.includes('wpdiscuz') ||
+                           editor.id.includes('wpdiscuz');
+          if (isEditable) {
+            // 进一步验证：在评论区域附近
+            const commentWrap = editor.closest('#comments, .comments, .comment-section, .wpd-thread');
+            if (commentWrap || editor.querySelector('p, span, div')) {
+              return editor;
+            }
+          }
+        }
+      } catch (e) {}
+    }
+    
+    // 备用：查找所有 contenteditable 元素并筛选
+    const allEditable = document.querySelectorAll('[contenteditable="true"]');
+    for (const el of allEditable) {
+      const className = (el.className || '').toLowerCase();
+      const id = (el.id || '').toLowerCase();
+      const parent = el.closest('#comments, .comments, .comment-section');
+      
+      if ((className.includes('wpdiscuz') || id.includes('wpdiscuz') || parent) &&
+          el.querySelector('p, span, div')) {
+        return el;
+      }
+    }
+    
+    return null;
+  }
+
   // 查找评论表单
   function findCommentForm() {
+    // 方法0: 检测 wpDiscuz
+    const wpDiscuzEditor = findWpDiscuzEditor();
+    if (wpDiscuzEditor) {
+      const form = wpDiscuzEditor.closest('form');
+      if (form) return form;
+    }
+
     // 方法1: 通过 textarea 关联的表单（与填充逻辑一致，允许 generic 回退）
     const commentTextarea = findLikelyCommentTextarea({ allowGenericFallback: true });
     if (commentTextarea) {
@@ -1668,7 +1829,15 @@
       'input[name="publish"]',
       'button[name="publish"]',
       '.publish',
-      '#wp-submit'
+      '#wp-submit',
+      // wpDiscuz 特定选择器
+      '.wpd-submit-btn',
+      '.wpdiscuz-submit-btn',
+      '.wpd-button',
+      'button[id*="wpdiscuz"]',
+      'button[class*="wpdiscuz"]',
+      '#wpdtdfьи_submit',
+      '.wc_comment_submit'
     ];
 
     for (const selector of wpSelectors) {
@@ -2396,8 +2565,9 @@
       '#email', 'input[name="email"]', 'input[type="email"]',
       'input[id="mail"]', 'input[name="mail"]',
       'input[id*="email" i]', 'input[class*="email" i]',
+      'input[name="your-email"]', 'input[name="your_mail"]',
       'input[placeholder*="email" i]', 'input[placeholder*="邮箱" i]',
-      'input[placeholder*="mail" i]'
+      'input[placeholder*="mail" i]', 'input[placeholder*="e-mail" i]'
     ];
     for (const sel of emailSelectors) {
       try {
@@ -2452,7 +2622,12 @@
       setValue(websiteInput, WEBSITE);
     }
     if (commentText && commentTextarea) {
-      setValue(commentTextarea, commentText);
+      // 检测是否是 wpDiscuz 编辑器
+      if (commentTextarea._isWpDiscuz) {
+        setValueForEditableDiv(commentTextarea._realElement, commentText);
+      } else {
+        setValue(commentTextarea, commentText);
+      }
     }
 
     // ── 步骤8：等待 DOM 更新后验证 ───────────────────────────
@@ -2462,8 +2637,11 @@
     const validationLog = {};
 
     // 验证 comment（预检查时跳过，因为文案尚未生成）
-    const cv = (commentTextarea.value || '').trim();
-    validationLog.comment = { filled: cv.length > 0, length: cv.length };
+    // 注意：如果是 wpDiscuz，需要从 _realElement 获取 textContent
+    const cv = commentTextarea._isWpDiscuz 
+      ? (commentTextarea._realElement.textContent || '').trim()
+      : (commentTextarea.value || '').trim();
+    validationLog.comment = { filled: cv.length > 0, length: cv.length, isWpDiscuz: !!commentTextarea._isWpDiscuz };
     if (!skipCommentValidation && (!cv || cv.length < 5)) {
       missingFields.push('comment');
     }
@@ -3145,6 +3323,22 @@
         return;
       }
       console.log('[content] 3/6 确认评论表单存在...');
+      // 先尝试触发评论表单展开（如果表单是隐藏的需要点击回复链接）
+      let form = findCommentForm();
+      let ta = findLikelyCommentTextarea({ allowGenericFallback: false });
+      if (!form || !ta) {
+        console.log('[content] 评论表单未展开，尝试触发展开...');
+        await triggerCommentFormFlow();
+        // 等待表单展开后再检查
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        form = findCommentForm();
+        ta = findLikelyCommentTextarea({ allowGenericFallback: false });
+      }
+      // 最终检查：仍然找不到评论框则判定为无评论框
+      if (!form || !ta) {
+        console.log('[content] 未找到评论框，结束任务');
+        throw new Error('__NO_COMMENT_BOX__');
+      }
       // 预检查只验证姓名/邮箱/网站字段是否存在，不验证comment（尚未生成）
       const fillResult = await ensureAllCommentFormFieldsFilled('', true);
       if (!fillResult.success) {
@@ -3200,6 +3394,33 @@
       console.log('[content] handleBatchTask 完成 <<<', { batchId, urlIndex });
     } catch (err) {
       console.error('[content] handleBatchTask 捕获错误:', err.message);
+      
+      // 特殊错误：未找到评论框
+      if (err.message === '__NO_COMMENT_BOX__') {
+        console.log('[content] 未找到评论框，上报并关闭标签页');
+        await writePendingResult(batchId, urlIndex, url, 'no_comment_box', null, '未找到评论框');
+        // 使用 BATCH_HANDLE_CONFIRM 触发 background -> batch 的 BATCH_CONFIRMED 流程
+        await new Promise((resolve) => {
+          chrome.runtime.sendMessage({
+            type: 'BATCH_HANDLE_CONFIRM',
+            batchId,
+            urlIndex,
+            url: url || '',
+            aiContent: '',
+            result: 'no_comment_box',
+            errorMessage: '未找到评论框'
+          }, (response) => {
+            console.log('[content] no_comment_box BATCH_HANDLE_CONFIRM 响应:', response);
+            resolve(response);
+          });
+        });
+        // 关闭当前标签页
+        setTimeout(() => {
+          window.close();
+        }, 1000);
+        return;
+      }
+      
       await writePendingResult(batchId, urlIndex, url, 'fail', null, err.message || String(err));
       await reportBatchResult(batchId, urlIndex, 'fail', null, err.message || String(err), url);
       // 不主动关闭窗口，等待超时自动关闭
@@ -3211,18 +3432,28 @@
    */
   function waitForPageReady() {
     return new Promise((resolve) => {
-      // 等待评论框或页面��载完毕
-      const maxWait = 10000;
+      // 等待评论框或页面加载完毕
+      const maxWait = 20000;
       const start = Date.now();
       const check = () => {
         if (Date.now() - start > maxWait) {
+          console.log('[content] waitForPageReady 超时，继续执行');
           resolve(); // 超时也继续
           return;
         }
-        const hasCommentArea =
-          document.querySelector('textarea[name*="comment" i], textarea[name*="reply" i], textarea[name*="message" i], #comment, #comments, .comment-form, textarea') ||
-          document.querySelector('form');
+        // 检查是否有评论相关元素（包括 textarea、#respond、评论区域等）
+        const hasCommentArea = 
+          document.querySelector(
+            'textarea[name*="comment" i], textarea[name*="reply" i], textarea[name*="message" i], ' +
+            'textarea[name*="comentario" i], textarea[name*="comentário" i], ' +
+            '#comment, #comments, .comment-form, #respond, .respond, .comment-respond, ' +
+            '#comments-area, .comments-area, .comentarios, #comentarios, .comentario, ' +
+            '.comment-list, .comment-section, .post-comments-area, ' +
+            '[contenteditable="true"][class*="comment"], [contenteditable="true"][class*="comentario"]'
+          ) ||
+          document.querySelector('form[action*="comment"]');
         if (hasCommentArea) {
+          console.log('[content] waitForPageReady 检测到评论区域，等待2秒让JS渲染完');
           setTimeout(resolve, 2000); // 额外等2秒让JS渲染完
         } else {
           setTimeout(check, 500);
