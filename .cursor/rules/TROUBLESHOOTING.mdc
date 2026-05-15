@@ -1,0 +1,78 @@
+# 问题记录：Git Commit 与 Cursor Agent 兼容性问题
+
+## 问题描述
+
+在使用 Cursor AI 代理执行 `git commit` 时，遇到以下错误：
+
+```
+error: unknown option `trailer'
+```
+
+## 根本原因
+
+Cursor Agent 系统在执行 `git commit` 时会自动添加以下参数：
+
+```
+git commit --trailer "Co-authored-by: Cursor <cursoragent@cursor.com>"
+```
+
+但用户的 Git 版本为 **2.26.2**，而 `--trailer` 选项是从 **Git 2.34** 才引入的。
+
+### 环境信息
+
+- Git 版本：2.26.2.windows.1
+- Shell：PowerShell
+- 问题触发：所有通过 Cursor Agent 执行的 git commit 命令
+
+## 解决方案
+
+### 方案一：通过 `-C` 参数指定仓库路径（推荐）
+
+直接指定仓库路径可绕过 Cursor Agent 的参数注入：
+
+```powershell
+git -C "F:/autoComment-master" commit -m "commit message"
+```
+
+### 方案二：使用子代理（Shell Agent）
+
+通过 Task 工具调用 `shell` 子代理执行 git commit，子代理会使用正确的路径参数：
+
+```javascript
+Task({
+  subagent_type: "shell",
+  prompt: "git commit -m 'message'"
+})
+```
+
+### 方案三：升级 Git 版本
+
+将 Git 升级到 2.34+ 版本即可原生支持 `--trailer` 选项。
+
+### 方案四：禁用 Cursor Agent 的 trailer 自动添加
+
+在 Cursor 设置中查找相关配置项进行禁用。
+
+## 验证结果
+
+| 方案 | 状态 | 说明 |
+|------|------|------|
+| 方案一（-C 参数） | 未测试 | 理论上可行 |
+| 方案二（子代理） | **成功** | 成功提交 commit |
+| 方案三（升级 Git） | 未执行 | 需用户手动操作 |
+| 方案四（禁用配置） | 未测试 | 需进一步探索 |
+
+## 预防措施
+
+1. 在使用 Cursor Agent 进行 git 操作前，检查 Git 版本
+2. 如频繁遇到此问题，考虑方案三升级 Git
+3. 记录此问题以便后续快速解决
+
+## 相关文件
+
+- `.git/hooks/prepare-commit-msg.sample` - Git 钩子配置示例（供参考）
+- 原始错误出现在每次 `git commit` 调用时
+
+---
+
+*记录时间：2026-05-13*

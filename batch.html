@@ -410,6 +410,7 @@
 
       .stats-card-value.total { color: #374151; }
       .stats-card-value.success { color: #059669; }
+      .stats-card-value.no-comment-box { color: #d97706; }
       .stats-card-value.fail { color: #dc2626; }
       .stats-card-value.rate { color: #2563eb; }
 
@@ -500,6 +501,7 @@
         font-weight: 600;
       }
       .result-badge.success { background: #d1fae5; color: #065f46; }
+      .result-badge.no_comment_box { background: #fef3c7; color: #92400e; }
       .result-badge.fail { background: #fee2e2; color: #991b1b; }
       .result-badge.skipped { background: #fef3c7; color: #92400e; }
 
@@ -618,26 +620,6 @@
       <h1>批量外链评论</h1>
       <div class="subtitle">上传 CSV 文件，批量打开目标页面，自动发送评论并记录结果</div>
 
-      <!-- 隔离浏览器启动 -->
-      <div class="card" id="isolatedBrowserCard">
-        <div class="card-title">隔离浏览器模式</div>
-        <div class="hint warn" id="isolationModeHint" style="display:none; margin-bottom: 12px;">
-          当前已在隔离浏览器中运行
-        </div>
-        <div id="normalModeContent">
-          <p style="font-size: 13px; color: #6b7280; margin-bottom: 12px;">
-            为避免插件干扰正常浏览，建议在专用的隔离浏览器中运行此插件。<br/>
-            点击下方按钮，会生成启动命令，在新窗口中运行插件。
-          </p>
-          <button class="btn btn-secondary" id="openIsolatedBrowserBtn">
-            🔒 生成并打开隔离浏览器
-          </button>
-          <div id="isolationCommandBox" style="display:none; margin-top: 12px;">
-            <p style="font-size: 12px; color: #374151; margin-bottom: 8px;">命令已复制到剪贴板，请在终端中运行：</p>
-            <pre id="isolationCommand" style="background: #1f2937; color: #f9fafb; padding: 12px; border-radius: 8px; font-size: 12px; overflow-x: auto; white-space: pre-wrap; word-break: break-all;"></pre>
-          </div>
-        </div>
-      </div>
 
       <!-- 文件上传区 -->
       <div class="card">
@@ -680,11 +662,6 @@
 
       <!-- 并发数配置 -->
       <div class="card">
-
-      </div>
-
-      <!-- 超时配置 -->
-      <div class="card">
         <div class="card-title">同时打开标签页数量</div>
         <div style="display:flex;align-items:center;gap:10px;margin-bottom: 20px;">
           <label for="concurrentInput" style="font-size:13px;font-weight:500;color:#374151;white-space:nowrap;margin:0;">同时打开标签页数量：</label>
@@ -698,8 +675,43 @@
           />
           <span style="font-size:12px;color:#9ca3af;">范围 1~10</span>
         </div>
-        
-        <div class="card-title">超时配置</div>
+
+        <div class="card-title">自动操作设置</div>
+        <div class="hint" style="margin-bottom: 12px;">
+          以下设置仅对本次批量任务导入的 URL 生效。
+        </div>
+
+        <div style="margin-bottom: 10px;">
+          <label style="display:flex;align-items:center;gap:8px;font-weight:500;font-size:13px;cursor:pointer;">
+            <input type="checkbox" id="batchAutoOpenPanel" />
+            <span>页面加载后自动打开"网站推广助手"浮动窗口</span>
+          </label>
+          <div class="hint" style="margin-left: 22px; margin-top: 4px;">
+            勾选后，每个页面加载后会在右下角自动弹出推广助手窗口。
+          </div>
+        </div>
+
+        <div style="margin-bottom: 10px;">
+          <label style="display:flex;align-items:center;gap:8px;font-weight:500;font-size:13px;cursor:pointer;">
+            <input type="checkbox" id="batchAutoGenerate" />
+            <span>页面加载时自动调用 AI 生成推广文案</span>
+          </label>
+          <div class="hint" style="margin-left: 22px; margin-top: 4px;">
+            勾选后，在检测到评论框后，自动调用 AI 生成推广文案。
+          </div>
+        </div>
+
+        <div>
+          <label style="display:flex;align-items:center;gap:8px;font-weight:500;font-size:13px;cursor:pointer;">
+            <input type="checkbox" id="batchAutoSubmit" />
+            <span>AI 生成文案后自动提交评论</span>
+          </label>
+          <div class="hint" style="margin-left: 22px; margin-top: 4px;">
+            勾选后，生成文案并填入评论框后，将自动点击"发送评论"按钮。
+          </div>
+        </div>
+
+        <div class="card-title" style="margin-top: 16px;">超时配置</div>
         <div style="display:flex;align-items:center;gap:10px;">
           <label for="timeoutInput" style="font-size:13px;font-weight:500;color:#374151;white-space:nowrap;margin:0;">单页处理超时时间（秒）：</label>
           <input
@@ -778,6 +790,10 @@
             <div class="stats-card-value success" id="statsSuccess">0</div>
           </div>
           <div class="stats-card">
+            <div class="stats-card-label">无评论框</div>
+            <div class="stats-card-value no-comment-box" id="statsNoCommentBox">0</div>
+          </div>
+          <div class="stats-card">
             <div class="stats-card-label">失败</div>
             <div class="stats-card-value fail" id="statsFail">0</div>
           </div>
@@ -792,6 +808,7 @@
             <option value="all">全部结果</option>
             <option value="success">仅成功</option>
             <option value="skipped">仅已存在</option>
+            <option value="no_comment_box">仅无评论框</option>
             <option value="fail">仅失败</option>
           </select>
           <select id="filterDomain">
@@ -813,11 +830,10 @@
             <thead>
               <tr>
                 <th>#</th>
-                <th>域名</th>
                 <th>目标页面</th>
                 <th>结果</th>
-                <th>AI 生成内容</th>
                 <th>错误信息</th>
+                <th>AI 生成内容</th>
                 <th>耗时</th>
                 <th>时间</th>
               </tr>
