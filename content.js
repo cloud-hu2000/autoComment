@@ -1842,6 +1842,73 @@
 
   // 查找评论表单
   function findCommentForm() {
+    // ── 方案A：直接用 WordPress 标准 form 选择器 ─────────────
+    const formSelectors = [
+      '#commentform',
+      '.comment-form',
+      '.commentform',
+      'form[name="commentform"]',
+      'form[id="commentform"]',
+      'form[class*="comment-form"]',
+      'form[id*="comment-form"]'
+    ];
+    for (const sel of formSelectors) {
+      try {
+        const el = document.querySelector(sel);
+        if (el && el.tagName === 'FORM') {
+          console.log('[AutoComment] 方案A找到表单:', sel);
+          return el;
+        }
+      } catch (_) {}
+    }
+
+    // ── 方案B：先找 textarea，再用 ta.form / closest('form') ──
+    const textarea = findLikelyCommentTextarea({ allowGenericFallback: true });
+    if (textarea) {
+      if (textarea.form) {
+        console.log('[AutoComment] 方案B通过 textarea.form 找到表单');
+        return textarea.form;
+      }
+      if (textarea.closest) {
+        const parentForm = textarea.closest('form');
+        if (parentForm) {
+          console.log('[AutoComment] 方案B通过 textarea.closest("form") 找到表单');
+          return parentForm;
+        }
+      }
+    }
+
+    // ── 方案C：在评论区域附近找 form ─────────────────────────
+    const areaSelectors = [
+      '#comments', '#respond', '.comment-respond',
+      '#comments-section', '.comments-area', '.comment-section'
+    ];
+    for (const sel of areaSelectors) {
+      const area = document.querySelector(sel);
+      if (area) {
+        const f = area.querySelector('form') || (area.closest ? area.closest('form') : null);
+        if (f) {
+          console.log('[AutoComment] 方案C通过评论区域找到表单:', sel);
+          return f;
+        }
+      }
+    }
+
+    // ── 方案D：直接找页面所有表单中含 comment/respond 关键词的 ─
+    const allForms = Array.from(document.querySelectorAll('form'));
+    for (const f of allForms) {
+      const text = (f.textContent || '').toLowerCase();
+      const cls = (f.className || '').toLowerCase();
+      const fid = (f.id || '').toLowerCase();
+      if (text.includes('comment') || text.includes('respond') ||
+          cls.includes('comment') || fid.includes('comment') ||
+          cls.includes('respond') || fid.includes('respond')) {
+        console.log('[AutoComment] 方案D通过关键词找到表单:', f.id, f.className);
+        return f;
+      }
+    }
+
+    // ── 以下为原逻辑（备选方案）──────────────────────────────
     // 方法0: 检测 wpDiscuz
     const wpDiscuzEditor = findWpDiscuzEditor();
     if (wpDiscuzEditor) {
@@ -1849,7 +1916,7 @@
       if (form) return form;
     }
 
-    // 方法1: 通过 textarea 关联的表单（与填充逻辑一致，允许 generic 回退）
+    // 方法1: 通过 textarea 关联的表单
     const commentTextarea = findLikelyCommentTextarea({ allowGenericFallback: true });
     if (commentTextarea) {
       const form = commentTextarea.form || (commentTextarea.closest && commentTextarea.closest('form'));
@@ -1857,7 +1924,7 @@
     }
 
     // 方法2: 通过表单 class/id 查找
-    const formSelectors = [
+    const legacySelectors = [
       '#commentform',
       '.comment-form',
       '.commentform',
@@ -1870,7 +1937,7 @@
       'form[action*="comment"]'
     ];
 
-    for (const selector of formSelectors) {
+    for (const selector of legacySelectors) {
       const form = document.querySelector(selector);
       if (form) return form;
     }
@@ -3409,6 +3476,7 @@
    */
   async function handleBatchTask(batchId, urlIndex, url, originalIndex) {
     console.log('[content] handleBatchTask 开始 >>>', { batchId, urlIndex, url, time: new Date().toISOString() });
+    let aiGenerated = false; // 标记AI是否已生成（用于失败时补偿）
     try {
       console.log('[content] 1/6 等待页面加载...');
       await waitForPageReady();
@@ -3451,29 +3519,43 @@
           }
         }
       }
-      // 如果仍然找不到评论框，使用宽松模式再试一次（与点击AI生成按钮后的行为一致）
+      // 最终检查：仍然找不到评论框则先触发流程再继续（与浮窗按钮行为一致）
       if (!form || !ta) {
-        console.log('[content] 严格模式未找到评论框，尝试宽松模式...');
+        console.log('[content] 未找到评论框，尝试触发展开流程...');
+        await triggerCommentFormFlow();
+        await new Promise(resolve => setTimeout(resolve, 2000));
         form = findCommentForm();
         ta = findLikelyCommentTextarea({ allowGenericFallback: true });
-        if (form || ta) {
-          console.log('[content] 宽松模式找到评论框');
-        }
       }
-      // 最终检查：仍然找不到评论框则判定为无评论框
+      // 关键：确认找到评论框后再生成 AI 文案，避免浪费积分
       if (!form || !ta) {
-        console.log('[content] 未找到评论框，结束任务');
+        console.log('[content] 未找到评论框，跳过AI生成，结束任务');
         throw new Error('__NO_COMMENT_BOX__');
+      }
+      console.log('[content] 4/6 生成AI文案...');
+      aiGenerated = true; // AI即将生成，标记用于失败时补偿
+      const aiContent = await generatePromotionCopyWithQwen();
+      console.log('[content] AI文案生成完成，长度:', aiContent ? aiContent.length : 0, aiContent ? aiContent.substring(0, 80) + '...' : 'null');
+      console.log('[content] 5/6 填充表单字段...');
+      // AI 生成完成后再次确认评论框存在（表单可能通过3懒加载在生成期间加载好）
+      form = findCommentForm();
+      ta = findLikelyCommentTextarea({ allowGenericFallback: true });
+      if (!form || !ta) {
+        console.log('[content] AI生成后未找到评论框，再次触发展开...');
+        await triggerCommentFormFlow();
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        form = findCommentForm();
+        ta = findLikelyCommentTextarea({ allowGenericFallback: true });
+      }
+      // 如果 AI 生成后仍然找不到评论框，记录警告但尝试填充（表单可能只是隐藏了）
+      if (!form || !ta) {
+        console.warn('[content] AI生成后仍未找到评论框，尝试继续填充（表单可能只是隐藏）');
       }
       // 预检查只验证姓名/邮箱/网站字段是否存在，不验证comment（尚未生成）
       const fillResult = await ensureAllCommentFormFieldsFilled('', true);
       if (!fillResult.success) {
         throw new Error('表单字段缺失: ' + (fillResult.missingFields || []).join(', '));
       }
-      console.log('[content] 4/6 生成AI文案...');
-      const aiContent = await generatePromotionCopyWithQwen();
-      console.log('[content] AI文案生成完成，长度:', aiContent ? aiContent.length : 0, aiContent ? aiContent.substring(0, 80) + '...' : 'null');
-      console.log('[content] 5/6 填充表单字段...');
       const refillResult = await ensureAllCommentFormFieldsFilled(aiContent);
       if (!refillResult.success) {
         throw new Error('表单填充失败: ' + (refillResult.missingFields || []).join(', '));
@@ -3520,7 +3602,34 @@
       console.log('[content] handleBatchTask 完成 <<<', { batchId, urlIndex });
     } catch (err) {
       console.warn('[content] handleBatchTask 捕获错误:', err.message);
-      
+
+      // AI已生成但失败，尝试补偿积分
+      if (aiGenerated) {
+        const userId = await getUserId();
+        if (userId) {
+          try {
+            const refundRes = await fetch('https://jieyunsang.cn/api/refund-points', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                userId,
+                batchId,
+                url,
+                reason: err.message || 'AI生成后提交失败'
+              })
+            });
+            const refundData = await refundRes.json();
+            if (refundData.success) {
+              console.log('[content] 积分补偿成功: +' + refundData.refundedPoints + ', 剩余: ' + refundData.remainingPoints);
+            } else {
+              console.warn('[content] 积分补偿失败:', refundData.error);
+            }
+          } catch (refundErr) {
+            console.error('[content] 调用积分补偿接口失败:', refundErr);
+          }
+        }
+      }
+
       // 特殊错误：未找到评论框
       if (err.message === '__NO_COMMENT_BOX__') {
         console.log('[content] 未找到评论框，上报并关闭标签页');

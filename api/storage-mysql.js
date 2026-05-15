@@ -68,6 +68,21 @@ async function initDb() {
     `);
     console.log('[MySQL] batch_urls 表已就绪');
 
+    // 积分补偿记录表
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS refund_points_log (
+        id             INT          PRIMARY KEY AUTO_INCREMENT,
+        user_id        VARCHAR(255) NOT NULL,
+        batch_id       VARCHAR(36)  DEFAULT NULL,
+        url            TEXT         DEFAULT NULL,
+        points         INT          NOT NULL DEFAULT 1,
+        reason         VARCHAR(255) DEFAULT NULL,
+        created_at     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_user_refund_date (user_id, created_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `);
+    console.log('[MySQL] refund_points_log 表已就绪');
+
     console.log('[MySQL] 所有表已就绪');
   } finally {
     conn.release();
