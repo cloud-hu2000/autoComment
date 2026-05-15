@@ -82,6 +82,7 @@ const concurrentInput = document.getElementById('concurrentInput');
 const statsPanel = document.getElementById('statsPanel');
 const statsTotal = document.getElementById('statsTotal');
 const statsSuccess = document.getElementById('statsSuccess');
+const statsSkipped = document.getElementById('statsSkipped');
 const statsFail = document.getElementById('statsFail');
 const statsRate = document.getElementById('statsRate');
 const filterResult = document.getElementById('filterResult');
@@ -724,7 +725,7 @@ async function openNextTab() {
       // 等待 content script 就绪后再发送任务
       function sendWhenReady(tabId, retries = 0) {
         if (retries > 20) {
-          console.error('[batch] content.js 就绪超时，放弃发送, tabId:', tabId);
+          console.warn('[batch] content.js 就绪超时，放弃发送, tabId:', tabId);
           return;
         }
         chrome.tabs.sendMessage(tabId, { type: 'PING' }).then(() => {
@@ -745,7 +746,12 @@ async function openNextTab() {
               console.warn('[batch] content.js 响应 ok=false 或无响应:', response);
             }
           }).catch((err) => {
-            console.error('[batch] sendMessage BATCH_HANDLE 发送失败:', err, 'tabId:', tab.id);
+            console.warn('[batch] sendMessage BATCH_HANDLE 发送失败:', err.message || err, 'tabId:', tab.id);
+            // 发送失败时，如果尚未记录结果，则记为失败
+            if (!localResults.some((r) => r.originalIndex === urlIndex)) {
+              console.log('[batch] sendMessage 失败但无结果记录，记为失败');
+              handleTabResult(urlIndex, 'fail', null, '消息发送失败：' + (err.message || '标签页可能已关闭'));
+            }
           });
         }).catch(() => {
           // content.js 还没注入，500ms 后重试
@@ -1169,11 +1175,13 @@ function renderStats() {
   const noCommentBox = localResults.filter((r) => r.result === 'no_comment_box').length;
   statsTotal.textContent = total;
   statsSuccess.textContent = success;
+  statsSkipped.textContent = skipped;
   statsFail.textContent = fail;
   statsNoCommentBox.textContent = noCommentBox;
-  skippedCountEl.textContent = skipped;
-  const processedRate = total > 0 ? Math.round((success / total) * 100) : 0;
-  statsRate.textContent = total > 0 ? `${processedRate}% (${skipped} 已存在)` : '—';
+  // 成功率 = (成功 + 已存在) / 总数
+  const validCount = success + skipped;
+  const successRate = total > 0 ? Math.round((validCount / total) * 100) : 0;
+  statsRate.textContent = total > 0 ? `${successRate}%` : '—';
 
   buildDomainOptions();
 

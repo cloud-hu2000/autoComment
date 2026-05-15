@@ -1076,14 +1076,19 @@
     // 遍历所有 a 标签，查找包含回复关键词的链接
     const allLinks = Array.from(document.querySelectorAll('a'));
     const replyLinks = [];
-    const replyKeywords = ['reply', 'respond', 'leave a reply', 're', 'ตอบ', 'แสดงความคิดเห็น', 'ความคิดเห็น'];
+    const replyKeywords = ['reply', 'respond', 'leave a reply', 'leave a comment', 'write a comment', 'add comment', 're', 'ตอบ', 'แสดงความคิดเห็น', 'ความคิดเห็น'];
     
     // 只在评论区域内查找回复链接，避免误点广告
     const commentAreas = [];
     const commentAreaSelectors = [
       '#comments', '.comments', '.comment-section', '#respond', '.respond',
       '.comment-respond', '#comments-section', '.comments-area', '.comment-area',
-      '.wpd-thread', '#wpd-thread', '.wpdiscuz'
+      '.wpd-thread', '#wpd-thread', '.wpdiscuz',
+      // fullcirclecinema.com 等网站使用的主评论容器
+      '.post-comments', '.entry-comments', '.post-comment',
+      '#post-comments', '#entry-comments',
+      '.comment-wrapper', '.commentlist', '#commentlist',
+      '.comments-area', '.comment_content', '.comment-body'
     ];
     for (const sel of commentAreaSelectors) {
       try {
@@ -1397,7 +1402,8 @@
       const name = (ta.name || '').toLowerCase();
       const id = (ta.id || '').toLowerCase();
       const placeholder = (ta.placeholder || '').toLowerCase();
-      const text = `${name} ${id} ${placeholder}`;
+      const ariaLabel = (ta.getAttribute('aria-label') || '').toLowerCase();
+      const text = `${name} ${id} ${placeholder} ${ariaLabel}`;
 
       const keywords = [
         'comment',
@@ -1427,6 +1433,11 @@
         'post a comment',
         'cancel reply',
         'subscribe',
+        // 增强：fullcirclecinema 等博客/新闻站点
+        'what do you think',
+        'share your thoughts',
+        'type here',
+        'enter your comment',
       ];
       if (keywords.some((k) => text.includes(k))) {
         commentTextareas.push(ta);
@@ -1524,7 +1535,15 @@
           'add comment',
           'follow-up comments',
           'new posts by email',
-          'new comments'
+          'new comments',
+          // fullcirclecinema 等电影/博客站点关键词
+          'cancel reply',
+          'you must be logged in',
+          'logged in as',
+          'notify me of',
+          'want to join the discussion',
+          'join the discussion',
+          'subscribe to our'
         ];
 
         // WordPress 和其他表单选择器
@@ -1608,7 +1627,21 @@
         '.dejar-comentario',
         '.dejar-un-comentario',
         '.comentarios-section',
-        '.post-comments-area'
+        '.post-comments-area',
+        // 增强：fullcirclecinema 等电影/博客站点的评论容器
+        '.post-comments',
+        '#post-comments',
+        '.entry-comments',
+        '#entry-comments',
+        '.commentlist',
+        '#commentlist',
+        '.comment-body',
+        '.commentlist-content',
+        // 增强：更多评论区域变体
+        '.post-comment',
+        '#post-comment',
+        '.article-comments',
+        '.story-comments'
       ];
 
       for (const selector of commentAreaSelectors) {
@@ -1631,6 +1664,49 @@
           });
         } catch (e) {
           // 忽略无效选择器
+        }
+      }
+    }
+
+    // 方法5: 检测 Disqus 评论系统
+    if (commentForms.size === 0 && commentTextareas.length === 0) {
+      const disqusIndicator = document.querySelector(
+        '#disqus_thread, ' +
+        '[id*="disqus"], ' +
+        'iframe[src*="disqus"], ' +
+        '.dsq-brlink, ' +
+        '#disqus_thread_injection'
+      );
+      if (disqusIndicator) {
+        console.log('[AutoComment] 检测到 Disqus 评论系统:', disqusIndicator.id || disqusIndicator.className);
+        // Disqus 需要用户点击 "Join the discussion" 或类似按钮来展开评论框
+        // 尝试点击展开 Disqus 评论框
+        const disqusOpenBtn = document.querySelector(
+          '#disqus_thread a, ' +
+          '[id*="disqus"] a, ' +
+          '.dsq-brlink a, ' +
+          'a[href*="disqus"], ' +
+          // Disqus 通用展开按钮
+          '#disqus_thread button, ' +
+          '.disqus-comment-count, ' +
+          '[data-disqus-identifier]'
+        );
+        if (disqusOpenBtn && !disqusOpenBtn.hasAttribute('data-auto-comment-clicked')) {
+          console.log('[AutoComment] 点击 Disqus 展开按钮');
+          disqusOpenBtn.setAttribute('data-auto-comment-clicked', 'true');
+          disqusOpenBtn.click();
+          // 返回一个占位对象，稍后会再次检测
+          return {
+            _isDisqusPlaceholder: true,
+            _disqusIndicator: disqusIndicator,
+            value: '',
+            get value() { return ''; },
+            set value(v) { /* ignore */ },
+            form: null,
+            closest: disqusIndicator.closest.bind(disqusIndicator),
+            querySelector: disqusIndicator.querySelector.bind(disqusIndicator),
+            querySelectorAll: disqusIndicator.querySelectorAll.bind(disqusIndicator)
+          };
         }
       }
     }
@@ -2646,24 +2722,20 @@
       missingFields.push('comment');
     }
 
-    // 验证 name
+    // 验证 name（某些网站不强制要求姓名，不影响提交）
     if (nameInput) {
       const nv = (nameInput.value || '').trim();
       validationLog.name = { filled: nv.length > 0, value: nv.substring(0, 20) };
-      if (!nv) missingFields.push('name (empty after fill)');
     } else {
-      validationLog.name = { found: false };
-      missingFields.push('name (input not found)');
+      validationLog.name = { found: false, optional: true };
     }
 
-    // 验证 email
+    // 验证 email（某些网站（如 Jetpack、Disqus）不强制要求邮箱，不影响提交）
     if (emailInput) {
       const ev = (emailInput.value || '').trim();
       validationLog.email = { filled: ev.length > 0, value: ev.substring(0, 20) };
-      if (!ev) missingFields.push('email (empty after fill)');
     } else {
-      validationLog.email = { found: false };
-      missingFields.push('email (input not found)');
+      validationLog.email = { found: false, optional: true };
     }
 
     // 验证 website（可选，不影响提交）
@@ -3334,6 +3406,26 @@
         form = findCommentForm();
         ta = findLikelyCommentTextarea({ allowGenericFallback: false });
       }
+      // 如果仍然找不到评论框，检测是否有 Disqus，需要额外等待 iframe 加载
+      if (!form || !ta) {
+        const hasDisqus = document.querySelector('#disqus_thread, [id*="disqus"], iframe[src*="disqus"]');
+        if (hasDisqus) {
+          console.log('[content] 检测到 Disqus，额外等待 iframe 加载...');
+          // 尝试点击展开按钮
+          const disqusBtn = document.querySelector('#disqus_thread a, [id*="disqus"] a, .dsq-brlink a, #disqus_thread button');
+          if (disqusBtn && !disqusBtn.hasAttribute('data-auto-comment-clicked')) {
+            disqusBtn.setAttribute('data-auto-comment-clicked', 'true');
+            disqusBtn.click();
+          }
+          // 等待 Disqus iframe 完全加载（最常需要的时间）
+          await new Promise(resolve => setTimeout(resolve, 5000));
+          form = findCommentForm();
+          ta = findLikelyCommentTextarea({ allowGenericFallback: true });
+          if (ta) {
+            console.log('[content] Disqus iframe 加载后找到评论框');
+          }
+        }
+      }
       // 如果仍然找不到评论框，使用宽松模式再试一次（与点击AI生成按钮后的行为一致）
       if (!form || !ta) {
         console.log('[content] 严格模式未找到评论框，尝试宽松模式...');
@@ -3402,7 +3494,7 @@
       }
       console.log('[content] handleBatchTask 完成 <<<', { batchId, urlIndex });
     } catch (err) {
-      console.error('[content] handleBatchTask 捕获错误:', err.message);
+      console.warn('[content] handleBatchTask 捕获错误:', err.message);
       
       // 特殊错误：未找到评论框
       if (err.message === '__NO_COMMENT_BOX__') {
@@ -3451,7 +3543,7 @@
           return;
         }
         // 检查是否有评论相关元素（包括 textarea、#respond、评论区域等）
-        const hasCommentArea = 
+        const hasCommentArea =
           document.querySelector(
             'textarea[name*="comment" i], textarea[name*="reply" i], textarea[name*="message" i], ' +
             'textarea[name*="comentario" i], textarea[name*="comentário" i], ' +
@@ -3461,6 +3553,28 @@
             '[contenteditable="true"][class*="comment"], [contenteditable="true"][class*="comentario"]'
           ) ||
           document.querySelector('form[action*="comment"]');
+
+        // 检测 Disqus 评论系统
+        const hasDisqus = document.querySelector(
+          '#disqus_thread, [id*="disqus"], iframe[src*="disqus"], .dsq-brlink'
+        );
+
+        if (hasDisqus) {
+          console.log('[content] waitForPageReady 检测到 Disqus，尝试展开...');
+          // 尝试点击 Disqus 展开按钮
+          const disqusBtn = document.querySelector(
+            '#disqus_thread a, [id*="disqus"] a, .dsq-brlink a, ' +
+            '#disqus_thread button, [data-disqus-identifier]'
+          );
+          if (disqusBtn && !disqusBtn.hasAttribute('data-auto-comment-clicked')) {
+            disqusBtn.setAttribute('data-auto-comment-clicked', 'true');
+            disqusBtn.click();
+            console.log('[content] 已点击 Disqus 展开按钮，等待加载...');
+            setTimeout(check, 2000); // 等待 Disqus 加载 iframe
+            return;
+          }
+        }
+
         if (hasCommentArea) {
           console.log('[content] waitForPageReady 检测到评论区域，等待2秒让JS渲染完');
           setTimeout(resolve, 2000); // 额外等2秒让JS渲染完
