@@ -1257,6 +1257,134 @@ function renderStats() {
   statsTableWrap.scrollTop = 0;
 }
 
+// ==================== 表单处理函数 ====================
+
+/**
+ * 在指定表单中查找评论相关元素
+ * @param {HTMLFormElement} form - 要搜索的表单元素
+ * @returns {Object} 包含表单统计和评论 textarea 的对象
+ */
+function findCommentForm(form) {
+  if (!form) {
+    console.log('[batch] findCommentForm: 表单为空');
+    return { success: false, missingFields: ['form not found'] };
+  }
+
+  console.log('[batch] findCommentForm 最终使用的表单:', {
+    id: form.id,
+    className: form.className,
+    action: form.action
+  });
+
+  // ── 步骤1：统计表单中所有输入框（用于日志）───────────────
+  const formAllInputs = Array.from(form.querySelectorAll('input'));
+  const formTextareas = Array.from(form.querySelectorAll('textarea'));
+  console.log('[batch] 表单中的 input 数量:', formAllInputs.length, 'textarea 数量:', formTextareas.length);
+  console.log('[batch] 表单中所有 input:', formAllInputs.map(i => ({
+    name: i.name, id: i.id, type: i.type, className: i.className,
+    placeholder: i.placeholder, valueLen: (i.value || '').length
+  })));
+
+  // ── 步骤2：找评论 textarea ───────────────────────────────
+  let commentTextarea = null;
+  if (formTextareas.length > 0) {
+    // 优先找有 comment 关键词的
+    commentTextarea = formTextareas.find(ta => {
+      const n = (ta.name || '').toLowerCase();
+      const i = (ta.id || '').toLowerCase();
+      return n.includes('comment') || i.includes('comment');
+    }) || formTextareas[0];
+  }
+  if (!commentTextarea) {
+    // 再从全局找并验证属于当前表单
+    const ta = findLikelyCommentTextarea({ allowGenericFallback: true });
+    if (ta && (ta.form === form || (ta.closest && ta.closest('form') === form))) {
+      commentTextarea = ta;
+    }
+  }
+
+  if (!commentTextarea) {
+    console.log('[batch] 未找到评论 textarea!');
+    return { success: false, missingFields: ['comment textarea not found'] };
+  }
+
+  return {
+    success: true,
+    form: form,
+    commentTextarea: commentTextarea,
+    formAllInputs: formAllInputs,
+    formTextareas: formTextareas
+  };
+}
+
+/**
+ * 全局查找可能的评论 textarea
+ * @param {Object} options - 选项
+ * @param {boolean} options.allowGenericFallback - 是否允许通用回退
+ * @returns {Element|null} 评论 textarea 元素
+ */
+function findLikelyCommentTextarea(options) {
+  const allowGenericFallback = options && options.allowGenericFallback;
+  const allTextareas = Array.from(document.querySelectorAll('textarea'));
+  if (allTextareas.length === 0) return null;
+
+  const commentTextareas = [];
+
+  // 方法1: 通过标准的 WordPress/comment 选择器直接查找
+  const standardSelectors = [
+    '#comment',
+    'textarea[name="comment"]',
+    'textarea#comment',
+    'textarea[id="comment"]',
+    'textarea[name="comment_content"]',
+    'textarea[id="comment_content"]',
+    'textarea[name="comments"]',
+    'textarea#comments'
+  ];
+
+  for (const selector of standardSelectors) {
+    try {
+      const ta = document.querySelector(selector);
+      if (ta && !commentTextareas.includes(ta)) {
+        commentTextareas.push(ta);
+      }
+    } catch (e) {
+      // 忽略无效选择器
+    }
+  }
+
+  // 方法2: 通过关键词匹配
+  if (commentTextareas.length === 0) {
+    allTextareas.forEach((ta) => {
+      if (commentTextareas.includes(ta)) return;
+
+      const name = (ta.name || '').toLowerCase();
+      const id = (ta.id || '').toLowerCase();
+      const placeholder = (ta.placeholder || '').toLowerCase();
+      const ariaLabel = (ta.getAttribute('aria-label') || '').toLowerCase();
+      const text = `${name} ${id} ${placeholder} ${ariaLabel}`;
+
+      const keywords = [
+        'comment', 'reply', 'message', 'review', 'feedback', 'opinion',
+        '留言', '评论', '回复', '响应',
+        'leave a comment', 'write a comment', 'post a comment',
+        'cancel reply', 'enter your comment', 'type here'
+      ];
+
+      if (keywords.some((k) => text.includes(k))) {
+        commentTextareas.push(ta);
+      }
+    });
+  }
+
+  // 通用回退：返回第一个 textarea
+  if (commentTextareas.length === 0 && allowGenericFallback && allTextareas.length > 0) {
+    return allTextareas[0];
+  }
+
+  return commentTextareas.length > 0 ? commentTextareas[0] : null;
+}
+
 // ==================== 工具函数 ====================
 function generateUUID() {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {

@@ -29,6 +29,7 @@ app.use((req, res, next) => {
 app.use('/api', require('./api/generate-copy'));
 app.use('/api', require('./api/get-points'));
 app.use('/api', require('./api/deduct-points'));
+app.use('/api', require('./api/refund-points'));
 app.use('/api', require('./api/batch'));
 
 // 健康检查
