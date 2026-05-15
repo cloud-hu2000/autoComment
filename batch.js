@@ -101,6 +101,40 @@ const batchAutoSubmit = document.getElementById('batchAutoSubmit');
 const BATCH_SETTINGS_KEY = 'batch_task_settings';
 const BATCH_URLS_KEY = 'batch_task_urls';
 
+// 全局勾选框设置的 storage.sync 键
+const BATCH_CHECKBOX_SETTINGS_KEY = 'batch_checkbox_settings';
+
+// 加载全局勾选框设置
+async function loadBatchCheckboxSettings() {
+  return new Promise((resolve) => {
+    chrome.storage.sync.get([BATCH_CHECKBOX_SETTINGS_KEY], (data) => {
+      const saved = data[BATCH_CHECKBOX_SETTINGS_KEY] || {};
+      batchAutoOpenPanel.checked = !!saved.autoOpenPanel;
+      batchAutoGenerate.checked = !!saved.autoGenerate;
+      batchAutoSubmit.checked = !!saved.autoSubmit;
+      console.log('[batch] 已加载全局勾选框设置:', saved);
+      resolve();
+    });
+  });
+}
+
+// 保存全局勾选框设置
+async function saveBatchCheckboxSettings() {
+  return new Promise((resolve) => {
+    const settings = {
+      autoOpenPanel: batchAutoOpenPanel.checked,
+      autoGenerate: batchAutoGenerate.checked,
+      autoSubmit: batchAutoSubmit.checked
+    };
+    chrome.storage.sync.set({
+      [BATCH_CHECKBOX_SETTINGS_KEY]: settings
+    }, () => {
+      console.log('[batch] 全局勾选框设置已保存:', settings);
+      resolve();
+    });
+  });
+}
+
 // ==================== 初始化 ====================
 document.addEventListener('DOMContentLoaded', init);
 
@@ -109,6 +143,7 @@ async function init() {
   await loadPoints();
   await loadTimeoutSetting();
   await loadConcurrentSetting();
+  await loadBatchCheckboxSettings(); // 全局记忆的勾选框设置
   bindEvents();
 
   updateUI();
@@ -211,6 +246,11 @@ function bindEvents() {
   // 设置
   timeoutInput.addEventListener('change', saveTimeoutSetting);
   concurrentInput.addEventListener('change', saveConcurrentSetting);
+
+  // 勾选框设置（全局记忆）
+  batchAutoOpenPanel.addEventListener('change', saveBatchCheckboxSettings);
+  batchAutoGenerate.addEventListener('change', saveBatchCheckboxSettings);
+  batchAutoSubmit.addEventListener('change', saveBatchCheckboxSettings);
 
   // 监听 background 消息（结果回调）
   chrome.runtime.onMessage.addListener((message) => {
