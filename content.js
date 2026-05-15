@@ -3334,6 +3334,15 @@
         form = findCommentForm();
         ta = findLikelyCommentTextarea({ allowGenericFallback: false });
       }
+      // 如果仍然找不到评论框，使用宽松模式再试一次（与点击AI生成按钮后的行为一致）
+      if (!form || !ta) {
+        console.log('[content] 严格模式未找到评论框，尝试宽松模式...');
+        form = findCommentForm();
+        ta = findLikelyCommentTextarea({ allowGenericFallback: true });
+        if (form || ta) {
+          console.log('[content] 宽松模式找到评论框');
+        }
+      }
       // 最终检查：仍然找不到评论框则判定为无评论框
       if (!form || !ta) {
         console.log('[content] 未找到评论框，结束任务');
