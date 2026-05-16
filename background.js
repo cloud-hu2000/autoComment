@@ -64,7 +64,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }).then(() => {
           console.log('[background] BATCH_CONFIRMED 发送成功');
         }).catch((e) => {
-          console.error('[background] BATCH_CONFIRMED 发送失败:', e);
+          if (e.message && e.message.includes('message channel closed')) {
+            console.log('[background] BATCH_CONFIRMED 发送失败（接收方已关闭），忽略');
+          } else {
+            console.error('[background] BATCH_CONFIRMED 发送失败:', e);
+          }
         });
 
         sendResponse({ ok: true });
