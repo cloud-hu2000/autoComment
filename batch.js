@@ -2,8 +2,6 @@
 
 // ==================== 配置 ====================
 const API_BASE = 'https://jieyunsang.cn/api';
-const CONCURRENT_TABS_STORAGE_KEY = 'batch_concurrent_tabs';
-const DEFAULT_CONCURRENT_TABS = 3;
 const POLL_INTERVAL = 3000;
 const TIMEOUT_CHECK_INTERVAL = 5000;
 const TIMEOUT_STORAGE_KEY = 'batch_timeout_seconds';
@@ -14,7 +12,6 @@ let userId = null;
 let parsedUrls = [];                // [{originalIndex, url}]
 let status = 'idle';                // idle | running | paused | completed
 let activeTabCount = 0;
-let maxConcurrentTabs = DEFAULT_CONCURRENT_TABS;
 let currentIndex = 0;               // 当前处理到的索引（本地管理）
 let initialPoints = 0;
 
@@ -78,7 +75,6 @@ const pointsHint = document.getElementById('pointsHint');
 const costHint = document.getElementById('costHint');
 const statusBadge = document.getElementById('statusBadge');
 const timeoutInput = document.getElementById('timeoutInput');
-const concurrentInput = document.getElementById('concurrentInput');
 const statsPanel = document.getElementById('statsPanel');
 const statsTotal = document.getElementById('statsTotal');
 const statsSuccess = document.getElementById('statsSuccess');
@@ -143,7 +139,6 @@ async function init() {
   await loadUserId();
   await loadPoints();
   await loadTimeoutSetting();
-  await loadConcurrentSetting();
   await loadBatchCheckboxSettings(); // 全局记忆的勾选框设置
   bindEvents();
 
@@ -188,17 +183,7 @@ async function loadTimeoutSetting() {
   });
 }
 
-async function loadConcurrentSetting() {
-  return new Promise((resolve) => {
-    chrome.storage.sync.get([CONCURRENT_TABS_STORAGE_KEY], (data) => {
-      const saved = parseInt(data[CONCURRENT_TABS_STORAGE_KEY], 10);
-      maxConcurrentTabs = (saved && saved >= 1 && saved <= 10) ? saved : DEFAULT_CONCURRENT_TABS;
-      concurrentInput.value = String(maxConcurrentTabs);
-      resolve();
-    });
-  });
-}
-
+// ==================== 事件绑定 ====================
 function saveTimeoutSetting() {
   const val = parseInt(timeoutInput.value, 10);
   if (val >= 10 && val <= 600) {
@@ -206,16 +191,6 @@ function saveTimeoutSetting() {
     chrome.storage.sync.set({ [TIMEOUT_STORAGE_KEY]: val });
   } else {
     timeoutInput.value = String(timeoutSeconds);
-  }
-}
-
-function saveConcurrentSetting() {
-  const val = parseInt(concurrentInput.value, 10);
-  if (val >= 1 && val <= 10) {
-    maxConcurrentTabs = val;
-    chrome.storage.sync.set({ [CONCURRENT_TABS_STORAGE_KEY]: val });
-  } else {
-    concurrentInput.value = String(maxConcurrentTabs);
   }
 }
 
@@ -246,7 +221,6 @@ function bindEvents() {
 
   // 设置
   timeoutInput.addEventListener('change', saveTimeoutSetting);
-  concurrentInput.addEventListener('change', saveConcurrentSetting);
 
   // 勾选框设置（全局记忆）
   batchAutoOpenPanel.addEventListener('change', saveBatchCheckboxSettings);
@@ -397,7 +371,8 @@ function parseCSV(raw, fileNameParam) {
     parsedUrls.push({
       originalIndex: parsedUrls.length,
       url,
-      sourceDomain
+      sourceDomain,
+      originalRow: row  // 保存原始行数据，用于导出时保持格式
     });
     validCount++;
 
@@ -507,8 +482,8 @@ async function startBatch() {
   updateUI();
   updateStatsUI();
 
-  // 串行打开初始标签页
-  await openNextTabConcurrently(maxConcurrentTabs);
+  // 打开第一个标签页
+  openNextTabSync();
 }
 
 // 保存批量任务设置到 storage.local
@@ -542,15 +517,6 @@ async function clearBatchTaskSettings() {
   });
 }
 
-// 串行打开 N 个标签页（确保每个 URL 只处理一次）
-async function openNextTabConcurrently(count) {
-  for (let i = 0; i < count; i++) {
-    if (status !== 'running') break;
-    await openNextTabSync();
-    await new Promise((resolve) => setTimeout(resolve, 500));
-  }
-}
-
 function togglePause() {
   if (status === 'running') {
     setStatus('paused');
@@ -558,8 +524,8 @@ function togglePause() {
     stopTimeoutChecker();
   } else if (status === 'paused') {
     setStatus('running');
-    // 继续处理
-    while (activeTabCount < maxConcurrentTabs && currentIndex < totalCount) {
+    // 继续处理（固定为1个标签页）
+    if (activeTabCount < 1 && currentIndex < totalCount) {
       openNextTabSync();
     }
   }
@@ -622,16 +588,10 @@ async function resumeBatch() {
   setStatus('running');
   updateUI();
 
-  // 从断点继续打开标签页
-  const tabsToOpen = Math.min(maxConcurrentTabs, totalCount - currentIndex);
-  console.log('[resumeBatch] 将打开', tabsToOpen, '个标签页');
+  // 从断点继续打开标签页（固定为1）
+  console.log('[resumeBatch] 将打开 1 个标签页');
 
-  for (let i = 0; i < tabsToOpen; i++) {
-    console.log('[resumeBatch] 打开标签页', i, '当前索引:', currentIndex);
-    openNextTabSync();
-    // 短暂延迟让标签页有机会打开
-    await new Promise(resolve => setTimeout(resolve, 200));
-  }
+  openNextTabSync();
 }
 
 // 立即打开下一个标签页（从本地队列获取）
@@ -647,7 +607,7 @@ async function openNextTabSync() {
 }
 
 async function openNextTab() {
-  console.log('[openNextTab] 检查条件', { status, isTerminated, activeTabCount, maxConcurrentTabs, currentIndex, totalCount });
+  console.log('[openNextTab] 检查条件', { status, isTerminated, activeTabCount, currentIndex, totalCount });
 
   if (status !== 'running') {
     console.log('[openNextTab] 跳过 - 状态不是 running');
@@ -657,8 +617,8 @@ async function openNextTab() {
     console.log('[openNextTab] 跳过 - 已终止');
     return;
   }
-  if (activeTabCount >= maxConcurrentTabs) {
-    console.log('[openNextTab] 跳过 - 达到并发上限');
+  if (activeTabCount >= 1) {
+    console.log('[openNextTab] 跳过 - 已有标签页在处理中');
     return;
   }
   if (currentIndex >= totalCount) {
@@ -672,7 +632,7 @@ async function openNextTab() {
   currentIndex++;
 
   try {
-    chrome.tabs.create({ url, active: false }, (tab) => {
+    chrome.tabs.create({ url, active: true }, (tab) => {
       activeTabCount++;
       activeTabs.set(tab.id, { urlIndex, startTime: Date.now() });
       activeTabsByIndex.set(urlIndex, { urlIndex, startTime: Date.now() });
@@ -799,7 +759,8 @@ function handleTabResult(urlIndex, result, aiContent, errorMessage, forcedElapse
     aiContent: aiContent || null,
     errorMessage: errorMessage || null,
     timestamp: Date.now(),
-    elapsed
+    elapsed,
+    originalRow: item.originalRow || null  // 保存原始行数据用于导出
   };
 
   localResults.push(resultEntry);
@@ -1037,25 +998,46 @@ function exportResults() {
     return;
   }
 
-  const header = '原序号,目标页面,结果,错误信息,AI内容,处理耗时(秒),处理时间';
+  // 查找第一条有原始行数据的结果来确定导入格式
+  const sampleResult = localResults.find((r) => r.originalRow && r.originalRow.length > 0);
+  if (!sampleResult) {
+    alert('缺少导入数据，无法按原始格式导出');
+    return;
+  }
+
+  const originalRowLen = sampleResult.originalRow.length;
+
+  // 根据原始列数生成表头，保持与导入格式一致，最后加"运行结果"
+  const originalHeaders = [];
+  for (let i = 0; i < originalRowLen; i++) {
+    if (i === 0) originalHeaders.push('页面AS');
+    else if (i === 1) originalHeaders.push('原URL');
+    else if (i === 2) originalHeaders.push('URL对应域名');
+    else if (i === 3) originalHeaders.push('目标域名');
+    else if (i === 4) originalHeaders.push('类型');
+    else if (i === 5) originalHeaders.push('外部链接数量');
+    else originalHeaders.push(`列${i + 1}`);
+  }
+  const header = [...originalHeaders, '运行结果'].join(',');
+
+  const escape = (val) => {
+    if (val == null) return '';
+    const str = String(val);
+    if (str.includes('"') || str.includes(',') || str.includes('\n')) {
+      return `"${str.replace(/"/g, '""')}"`;
+    }
+    return str;
+  };
+
   const rows = localResults.map((r) => {
-    const escape = (val) => {
-      if (val == null) return '';
-      const str = String(val);
-      if (str.includes('"') || str.includes(',') || str.includes('\n')) {
-        return `"${str.replace(/"/g, '""')}"`;
-      }
-      return str;
-    };
-    return [
-      r.originalIndex + 1,
-      escape(r.url),
-      r.result,
-      escape(r.errorMessage),
-      escape(r.aiContent),
-      r.elapsed != null ? r.elapsed : '',
-      r.timestamp ? new Date(r.timestamp).toLocaleString() : ''
-    ].join(',');
+    // 基础列：页面AS=原序号-1，其他列从原始数据中取
+    const baseCols = [];
+    for (let i = 0; i < originalRowLen; i++) {
+      baseCols.push(escape(r.originalRow[i] || ''));
+    }
+    // 运行结果：success=√，其他=×
+    const runResult = r.result === 'success' ? '√' : '×';
+    return [...baseCols, runResult].join(',');
   });
 
   const csv = [header, ...rows].join('\n');
