@@ -462,18 +462,28 @@
     const targetWebsiteContent = promotionWebsiteContent || '未配置网站内容';
 
     return [
-      '你是一个资深的网站营销与文案专家，擅长为各类网站撰写自然、真实的评论文案。',
-      '请严格根据我提供的"当前网站内容"进行分析和创作，不要凭空捏造当前网站不存在的功能或信息。',
+      '你是一个合规的网站营销与评论文案助手，擅长为正常、合法、主题相关的网站撰写自然、真实的评论文案。',
+      '请严格根据我提供的"当前网站内容"进行判断、分析和创作，不要凭空捏造当前网站不存在的功能或信息。',
       '',
       '【我的网站信息】',
       `网站链接：${targetWebsiteUrl}`,
       `网站内容：${targetWebsiteContent}`,
       '',
+      '',
       '【输出要求】',
       '1. 我需要在当前网站发表评论，评论需要自然关联到上面的"我的网站信息"，并吸引用户访问我的网站。',
       '2. 语气可以专业但要自然、真实，避免夸张、虚假宣传，避免明显广告腔。',
       '3. 使用当前网站内容的主要语言作为输出语言，字数建议控制在 100 词左右。',
-      '4. 只输出最终评论内容，不要输出标题、字段名、解释说明或多余格式。'
+      '4. 只输出最终评论内容，不要输出标题、字段名、解释说明或多余格式；如果触发安全与合规规则，只输出空字符串。',
+      '5.【链接格式要求】',
+      'If you output any HTML link, the href attribute value MUST contain a real line break immediately before the closing double quote.',
+      'Correct example:',
+      '<a href="https://example.com/',
+      '">点击这里</a>',
+      'Wrong examples:',
+      '<a href="https://example.com/">点击这里</a>',
+      '<a href="https://example.com/\\n">点击这里</a>',
+      'The required line break must be an actual newline character in the output, not the two characters \\ and n.'
     ].join('\n');
   }
 
@@ -978,8 +988,10 @@
         console.log('[AutoComment] handleBatchTaskForAutoMode 生成AI文案...');
         promotionText = await generatePromotionCopyWithQwen();
         if (!promotionText) {
-          console.log('[AutoComment] handleBatchTaskForAutoMode AI文案生成失败，结束任务');
-          throw new Error('__AI_GENERATION_FAILED__');
+          console.log('[AutoComment] handleBatchTaskForAutoMode blocked generated copy, skip current URL');
+          await writePendingResult(batchId, urlIndex, url, 'skipped', null, 'blocked_keyword');
+          await reportBatchResult(batchId, urlIndex, 'skipped', null, 'blocked_keyword', url);
+          return;
         }
         console.log('[AutoComment] handleBatchTaskForAutoMode AI文案生成成功，长度:', promotionText.length);
       }
@@ -3101,7 +3113,9 @@
       throw new Error(msg);
     }
 
-    const aiText = data.text || '未能从响应中解析出文案内容。';
+    const aiText = Object.prototype.hasOwnProperty.call(data, 'text')
+      ? String(data.text || '')
+      : '未能从响应中解析出文案内容。';
 
     console.log('AI 生成的网站推广文案：\n', aiText);
     return aiText;
@@ -3293,6 +3307,14 @@
       setGenerateLoading(true);
       try {
         const text = await generatePromotionCopyWithQwen();
+        if (!text) {
+          lastGeneratedPromotionCopy = '';
+          textarea.value = '';
+          setStatus('当前页面命中黑名单，已跳过生成并退回积分。', '#f59e0b');
+          setCopyEnabled(false);
+          setGenerateLoading(false);
+          return;
+        }
         lastGeneratedPromotionCopy = text;
         textarea.value = text;
         await recordGenerationTime(text);
@@ -3762,6 +3784,13 @@
         console.log('[content] 4/6 生成AI文案...');
         aiGenerated = true; // AI即将生成，标记用于失败时补偿
         aiContent = await generatePromotionCopyWithQwen();
+        if (!aiContent) {
+          aiGenerated = false;
+          console.log('[content] AI文案命中黑名单，已由后端退回积分，跳过当前URL');
+          await writePendingResult(batchId, urlIndex, url, 'skipped', null, 'blocked_keyword');
+          await reportBatchResult(batchId, urlIndex, 'skipped', null, 'blocked_keyword', url);
+          return;
+        }
       }
       console.log('[content] AI文案生成完成，长度:', aiContent ? aiContent.length : 0, aiContent ? aiContent.substring(0, 80) + '...' : 'null');
       console.log('[content] 5/6 填充表单字段...');
