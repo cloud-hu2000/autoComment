@@ -25,9 +25,11 @@ app.use((req, res, next) => {
   next();
 });
 
+const blogRunStatsHandler = require('./api/blog-run-stats');
+
 // 挂载各 API 路由
 app.post('/api/generate-copy', require('./api/generate-copy'));
-app.post('/api/blog-run-stats', require('./api/blog-run-stats'));
+app.post('/api/blog-run-stats', blogRunStatsHandler);
 app.use('/api', require('./api/get-points'));
 app.use('/api', require('./api/deduct-points'));
 app.use('/api', require('./api/refund-points'));
@@ -49,4 +51,7 @@ app.use((req, res) => {
 // 启动
 app.listen(PORT, () => {
   console.log(`[Server] 后端服务已启动，监听端口 ${PORT}`);
+  blogRunStatsHandler.ensureTable().catch((err) => {
+    console.error('[Server] blog_run_stats 表初始化失败:', err);
+  });
 });

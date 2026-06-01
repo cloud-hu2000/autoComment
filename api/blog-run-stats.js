@@ -1,45 +1,53 @@
-const mysql = require('mysql2/promise');
+const { execute, query } = require('./db');
 
-const DB_CONFIG = process.env.DATABASE_URL || {
-  host: process.env.MYSQL_HOST || '127.0.0.1',
-  port: parseInt(process.env.MYSQL_PORT || '3306', 10),
-  user: process.env.MYSQL_USER || 'root',
-  password: process.env.MYSQL_PASSWORD || '',
-  database: process.env.MYSQL_DATABASE || 'auto_comment',
-  waitForConnections: true,
-  connectionLimit: 5,
-  queueLimit: 0,
-  charset: 'utf8mb4'
-};
-
-let pool;
 let initPromise;
 
-function getPool() {
-  if (!pool) {
-    pool = mysql.createPool(DB_CONFIG);
-  }
-  return pool;
+async function tableExists() {
+  const rows = await query(
+    `
+      SELECT TABLE_NAME
+      FROM INFORMATION_SCHEMA.TABLES
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = ?
+      LIMIT 1
+    `,
+    ['blog_run_stats']
+  );
+  return rows.length > 0;
 }
 
 async function ensureTable() {
   if (!initPromise) {
-    initPromise = getPool().execute(`
-      CREATE TABLE IF NOT EXISTS blog_run_stats (
-        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-        page_as VARCHAR(255) DEFAULT '',
-        original_url TEXT NOT NULL,
-        url_domain VARCHAR(255) NOT NULL,
-        target_domain VARCHAR(255) DEFAULT '',
-        link_type VARCHAR(255) DEFAULT '',
-        external_link_count INT NOT NULL DEFAULT 0,
-        validation_result TINYINT NOT NULL,
-        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        PRIMARY KEY (id),
-        UNIQUE KEY uk_blog_run_stats_url_domain (url_domain)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    `);
+    initPromise = (async () => {
+      if (await tableExists()) {
+        console.log('[blog-run-stats] table already exists');
+        return;
+      }
+
+      await execute(
+        `
+          CREATE TABLE IF NOT EXISTS blog_run_stats (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            page_as VARCHAR(255) DEFAULT '',
+            original_url TEXT NOT NULL,
+            url_domain VARCHAR(255) NOT NULL,
+            target_domain VARCHAR(255) DEFAULT '',
+            link_type VARCHAR(255) DEFAULT '',
+            external_link_count INT NOT NULL DEFAULT 0,
+            validation_result TINYINT NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            UNIQUE KEY uk_blog_run_stats_url_domain (url_domain)
+          ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        `,
+        []
+      );
+      console.log('[blog-run-stats] table created');
+    })().catch((err) => {
+      initPromise = null;
+      throw err;
+    });
   }
   return initPromise;
 }
@@ -91,7 +99,7 @@ module.exports = async function handler(req, res) {
 
   try {
     await ensureTable();
-    await getPool().execute(
+    await execute(
       `
         INSERT INTO blog_run_stats (
           page_as,
@@ -129,3 +137,5 @@ module.exports = async function handler(req, res) {
     return res.status(500).json({ success: false, message: 'Internal server error' });
   }
 };
+
+module.exports.ensureTable = ensureTable;
