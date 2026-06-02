@@ -1238,6 +1238,7 @@
 
     fillInputs();
     setupFormSubmitListener();
+    ensureOutlinkFloatingButton();
 
     getAutoOpenQwenPanelSetting().then((shouldOpen) => {
       if (shouldOpen) {
@@ -3661,6 +3662,122 @@
     btnRow.appendChild(generateBtn);
     btnRow.appendChild(outlinkBtn);
     btnRow.appendChild(copyBtn);
+  }
+
+  // ====== 独立外链导出浮窗按钮 ======
+  // 不依赖 AI 面板自动打开设置；批量任务打开博客页时也必须能直接点击并下载 CSV。
+  function analyzePageOutlinksForExport() {
+    const links = Array.from(document.querySelectorAll('a[href]'));
+    const currentHost = window.location.hostname;
+    const currentDomain = currentHost.replace(/^www\./, '');
+
+    const outlinks = links
+      .map(link => {
+        const href = link.href;
+        try {
+          const url = new URL(href);
+          if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+            return null;
+          }
+
+          const linkDomain = url.hostname.replace(/^www\./, '');
+          if (linkDomain === currentDomain) {
+            return null;
+          }
+
+          const rel = (link.rel || '').toLowerCase();
+          const isNofollow = rel.includes('nofollow');
+          return {
+            url: href,
+            text: link.textContent?.trim() || link.innerText?.trim() || '',
+            host: url.hostname,
+            isNofollow,
+            isDofollow: !isNofollow
+          };
+        } catch (e) {
+          return null;
+        }
+      })
+      .filter(Boolean);
+
+    const seen = new Set();
+    return outlinks.filter(link => {
+      if (seen.has(link.url)) return false;
+      seen.add(link.url);
+      return true;
+    });
+  }
+
+  function exportPageOutlinksCsv() {
+    const outlinks = analyzePageOutlinksForExport();
+    const csvHost = window.location.hostname || 'unknown-host';
+    const csvContent = [
+      ['URL', 'Hostname', 'Type', 'Link Text'].join(','),
+      ...outlinks.map(l => [
+        `"${String(l.url || '').replace(/"/g, '""')}"`,
+        `"${String(l.host || '').replace(/"/g, '""')}"`,
+        l.isDofollow ? 'DoFollow' : 'NoFollow',
+        `"${String(l.text || '').replace(/"/g, '""')}"`
+      ].join(','))
+    ].join('\n');
+
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `outlinks-${csvHost}.csv`;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    console.log('[AutoComment] 已导出外链 CSV:', { host: csvHost, count: outlinks.length });
+  }
+
+  function ensureOutlinkFloatingButton() {
+    if (document.getElementById('auto-comment-export-outlinks-btn')) {
+      return;
+    }
+
+    const btn = document.createElement('button');
+    btn.id = 'auto-comment-export-outlinks-btn';
+    btn.type = 'button';
+    btn.textContent = '导出外链';
+    btn.setAttribute('data-action', 'analyze-backlinks');
+    btn.setAttribute('data-testid', 'analyze-backlinks');
+    btn.title = '导出当前页面外链 CSV';
+    btn.style.position = 'fixed';
+    btn.style.left = '18px';
+    btn.style.bottom = '86px';
+    btn.style.zIndex = '2147483647';
+    btn.style.display = 'inline-flex';
+    btn.style.alignItems = 'center';
+    btn.style.justifyContent = 'center';
+    btn.style.minWidth = '88px';
+    btn.style.height = '36px';
+    btn.style.padding = '0 14px';
+    btn.style.border = '1px solid rgba(148,163,184,0.72)';
+    btn.style.borderRadius = '999px';
+    btn.style.background = 'rgba(15,23,42,0.94)';
+    btn.style.color = '#f8fafc';
+    btn.style.boxShadow = '0 10px 26px rgba(15,23,42,0.35)';
+    btn.style.fontFamily = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif";
+    btn.style.fontSize = '13px';
+    btn.style.fontWeight = '600';
+    btn.style.lineHeight = '1';
+    btn.style.cursor = 'pointer';
+    btn.style.whiteSpace = 'nowrap';
+    btn.addEventListener('mouseenter', () => {
+      btn.style.background = 'rgba(30,41,59,0.98)';
+    });
+    btn.addEventListener('mouseleave', () => {
+      btn.style.background = 'rgba(15,23,42,0.94)';
+    });
+    btn.addEventListener('click', exportPageOutlinksCsv);
+
+    (document.body || document.documentElement).appendChild(btn);
+    console.log('[AutoComment] 独立导出外链浮窗按钮已注入');
   }
 
   // 监听 background.js 中点击扩展图标发送的消息
