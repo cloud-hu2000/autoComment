@@ -313,6 +313,14 @@ function buildPurchaseStatus(row) {
   return result;
 }
 
+function normalizeUserId(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function normalizeOutTradeNo(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
 async function closeExpiredPendingOrders(userId) {
   await execute(
     `
@@ -324,6 +332,19 @@ async function closeExpiredPendingOrders(userId) {
         AND created_at < DATE_SUB(NOW(), INTERVAL 2 HOUR)
     `,
     [userId]
+  );
+}
+
+async function findOrderForUser(userId, outTradeNo) {
+  return queryOne(
+    `
+      SELECT *
+      FROM payment_orders
+      WHERE user_id = ?
+        AND out_trade_no = ?
+      LIMIT 1
+    `,
+    [userId, outTradeNo]
   );
 }
 
@@ -389,6 +410,42 @@ function buildPayUrl({ outTradeNo, plan }) {
   });
 }
 
+function isExpiredPendingOrder(order) {
+  return order && order.status === 'pending_payment' && getPendingOrderRemainingSeconds(order) <= 0;
+}
+
+async function markPendingOrderClosed(userId, outTradeNo) {
+  await execute(
+    `
+      UPDATE payment_orders
+      SET status = 'closed',
+          updated_at = NOW()
+      WHERE user_id = ?
+        AND out_trade_no = ?
+        AND status = 'pending_payment'
+    `,
+    [userId, outTradeNo]
+  );
+}
+
+function isAlipaySuccess(result) {
+  return result && String(result.code) === '10000';
+}
+
+function isAlipayTradeNotExist(result) {
+  const subCode = String(result && (result.subCode || result.sub_code || '')).toUpperCase();
+  return subCode === 'ACQ.TRADE_NOT_EXIST';
+}
+
+async function closeAlipayTrade(outTradeNo) {
+  const sdk = getSdk();
+  return sdk.exec('alipay.trade.close', {
+    bizContent: {
+      out_trade_no: outTradeNo
+    }
+  });
+}
+
 async function createOrder(req, res) {
   const { userId, planId } = req.body || {};
 
@@ -396,7 +453,11 @@ async function createOrder(req, res) {
     return res.status(400).json({ success: false, error: '缺少 userId 参数' });
   }
 
-  const normalizedUserId = userId.trim();
+  const normalizedUserId = normalizeUserId(userId);
+  if (!normalizedUserId) {
+    return res.status(400).json({ success: false, error: '缺少 userId 参数' });
+  }
+
   const plan = getPlan(planId);
   if (!plan) {
     return res.status(400).json({ success: false, error: '无效的套餐' });
@@ -511,6 +572,138 @@ async function createOrder(req, res) {
     if (conn) {
       conn.release();
     }
+  }
+}
+
+async function continueOrder(req, res) {
+  const { userId, outTradeNo } = req.body || {};
+  const normalizedUserId = normalizeUserId(userId);
+  const normalizedOutTradeNo = normalizeOutTradeNo(outTradeNo);
+
+  if (!normalizedUserId) {
+    return res.status(400).json({ success: false, error: '缺少 userId 参数' });
+  }
+  if (!normalizedOutTradeNo) {
+    return res.status(400).json({ success: false, error: '缺少 outTradeNo 参数' });
+  }
+
+  try {
+    await ensureTables();
+    await closeExpiredPendingOrders(normalizedUserId);
+
+    const order = await findOrderForUser(normalizedUserId, normalizedOutTradeNo);
+    if (!order) {
+      return res.status(404).json({ success: false, code: 'ORDER_NOT_FOUND', message: '订单不存在' });
+    }
+    if (isExpiredPendingOrder(order)) {
+      await markPendingOrderClosed(normalizedUserId, normalizedOutTradeNo);
+      return res.status(410).json({
+        success: false,
+        code: 'ORDER_EXPIRED',
+        message: '待支付订单已超时关闭',
+        order: { ...buildPurchaseStatus(order), status: 'closed', statusText: STATUS_TEXT.closed }
+      });
+    }
+    if (order.status !== 'pending_payment') {
+      return res.status(409).json({
+        success: false,
+        code: 'ORDER_NOT_PENDING_PAYMENT',
+        message: '只有待支付订单可以继续支付',
+        order: buildPurchaseStatus(order)
+      });
+    }
+
+    const plan = getPlan(order.plan_id);
+    if (!plan) {
+      return res.status(409).json({
+        success: false,
+        code: 'UNKNOWN_ORDER_PLAN',
+        message: '订单套餐不存在，无法继续支付',
+        order: buildPurchaseStatus(order)
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      reused: true,
+      outTradeNo: order.out_trade_no,
+      payUrl: buildPayUrl({ outTradeNo: order.out_trade_no, plan }),
+      env: getAlipayEnv(),
+      order: buildPurchaseStatus(order),
+      plan: {
+        id: plan.id,
+        name: plan.name,
+        amount: plan.amount
+      }
+    });
+  } catch (error) {
+    console.error('[alipay] continue-order failed:', error);
+    return res.status(500).json({
+      success: false,
+      error: '继续支付订单失败',
+      message: error.message
+    });
+  }
+}
+
+async function cancelOrder(req, res) {
+  const { userId, outTradeNo } = req.body || {};
+  const normalizedUserId = normalizeUserId(userId);
+  const normalizedOutTradeNo = normalizeOutTradeNo(outTradeNo);
+
+  if (!normalizedUserId) {
+    return res.status(400).json({ success: false, error: '缺少 userId 参数' });
+  }
+  if (!normalizedOutTradeNo) {
+    return res.status(400).json({ success: false, error: '缺少 outTradeNo 参数' });
+  }
+
+  try {
+    await ensureTables();
+    await closeExpiredPendingOrders(normalizedUserId);
+
+    const order = await findOrderForUser(normalizedUserId, normalizedOutTradeNo);
+    if (!order) {
+      return res.status(404).json({ success: false, code: 'ORDER_NOT_FOUND', message: '订单不存在' });
+    }
+    if (order.status !== 'pending_payment') {
+      return res.status(409).json({
+        success: false,
+        code: 'ORDER_NOT_PENDING_PAYMENT',
+        message: '只有待支付订单可以取消',
+        order: buildPurchaseStatus(order)
+      });
+    }
+
+    let closeResult = null;
+    if (!isExpiredPendingOrder(order)) {
+      closeResult = await closeAlipayTrade(normalizedOutTradeNo);
+      if (!isAlipaySuccess(closeResult) && !isAlipayTradeNotExist(closeResult)) {
+        return res.status(502).json({
+          success: false,
+          code: 'ALIPAY_CLOSE_FAILED',
+          message: (closeResult && (closeResult.subMsg || closeResult.sub_msg || closeResult.msg)) || '支付宝关闭交易失败',
+          alipay: closeResult,
+          order: buildPurchaseStatus(order)
+        });
+      }
+    }
+
+    await markPendingOrderClosed(normalizedUserId, normalizedOutTradeNo);
+    return res.status(200).json({
+      success: true,
+      status: 'closed',
+      statusText: STATUS_TEXT.closed,
+      outTradeNo: normalizedOutTradeNo,
+      alipay: closeResult
+    });
+  } catch (error) {
+    console.error('[alipay] cancel-order failed:', error);
+    return res.status(500).json({
+      success: false,
+      error: '取消订单失败',
+      message: error.message
+    });
   }
 }
 
@@ -724,6 +917,8 @@ function configDiagnostics(req, res) {
 }
 
 router.post('/alipay/create-order', createOrder);
+router.post('/alipay/continue-order', continueOrder);
+router.post('/alipay/cancel-order', cancelOrder);
 router.post('/alipay/notify', handleNotify);
 router.get('/alipay/return', returnPage);
 router.get('/alipay/config-diagnostics', configDiagnostics);

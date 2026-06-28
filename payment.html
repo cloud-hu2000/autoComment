@@ -70,6 +70,23 @@
         border: 1px solid #e5e7eb;
       }
 
+      .btn-danger {
+        background: #fff;
+        color: #b91c1c;
+        border: 1px solid #fecaca;
+      }
+
+      .btn-danger:hover {
+        background: #fef2f2;
+      }
+
+      .btn:disabled {
+        cursor: not-allowed;
+        opacity: 0.62;
+        transform: none;
+        box-shadow: none;
+      }
+
       .layout {
         display: grid;
         grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr);
@@ -242,10 +259,87 @@
         line-height: 1.55;
       }
 
+      .orders-panel {
+        margin-top: 16px;
+      }
+
+      .orders-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+
+      .orders-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .order-item {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 12px;
+        align-items: center;
+        padding: 12px;
+        border: 1px solid #e5e7eb;
+        border-radius: 10px;
+        background: #fff;
+      }
+
+      .order-title {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 8px;
+        font-size: 14px;
+        font-weight: 800;
+        color: #111827;
+      }
+
+      .status-pill {
+        padding: 3px 8px;
+        border-radius: 999px;
+        background: #eff6ff;
+        color: #1d4ed8;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .order-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 14px;
+        color: #6b7280;
+        font-size: 12px;
+      }
+
+      .order-meta strong {
+        color: #374151;
+      }
+
+      .order-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        justify-content: flex-end;
+      }
+
+      .empty-orders {
+        padding: 14px 12px;
+        border: 1px dashed #d1d5db;
+        border-radius: 10px;
+        color: #6b7280;
+        font-size: 13px;
+        text-align: center;
+      }
+
       @media (max-width: 760px) {
         body { padding: 16px; }
         .topbar { align-items: flex-start; flex-direction: column; }
         .layout, .plan-grid { grid-template-columns: 1fr; }
+        .order-item { grid-template-columns: 1fr; }
+        .order-actions { justify-content: flex-start; }
       }
     </style>
   </head>
@@ -321,6 +415,16 @@
           <div class="notice">
             支付成功后，订单状态会变为“已支付，待人工发货”。发货完成后由后台直接更新数据库，插件首页会显示最新套餐状态。
           </div>
+        </div>
+      </div>
+
+      <div class="card panel orders-panel">
+        <div class="orders-head">
+          <div class="section-title" style="margin: 0;">待支付订单</div>
+          <button id="refreshOrdersBtn" class="btn btn-secondary">刷新订单</button>
+        </div>
+        <div class="orders-list" id="pendingOrdersList">
+          <div class="empty-orders">正在读取待支付订单...</div>
         </div>
       </div>
     </div>

@@ -30,6 +30,16 @@ function createDbMock() {
 
   async function execute(sql, params = []) {
     state.executedSql.push(sql);
+    if (/UPDATE\s+payment_orders/i.test(sql) && /SET\s+status\s*=\s*'closed'/i.test(sql) && /out_trade_no/i.test(sql)) {
+      const [userId, outTradeNo] = params;
+      const order = state.orders.find((item) => item.user_id === userId && item.out_trade_no === outTradeNo);
+      if (order && order.status === 'pending_payment') {
+        order.status = 'closed';
+        order.updated_at = new Date('2026-06-27T10:00:00.000Z');
+      }
+      return { affectedRows: order ? 1 : 0 };
+    }
+
     if (/UPDATE\s+payment_orders/i.test(sql) && /paid_pending_fulfillment/i.test(sql)) {
       const [alipayTradeNo, rawNotify, outTradeNo] = params;
       const order = state.orders.find((item) => item.out_trade_no === outTradeNo);
@@ -84,6 +94,10 @@ function createDbMock() {
   }
 
   async function queryOne(sql, params = []) {
+    if (/WHERE\s+user_id\s*=\s*\?/i.test(sql) && /out_trade_no\s*=\s*\?/i.test(sql)) {
+      return clone(state.orders.find((order) => order.user_id === params[0] && order.out_trade_no === params[1]));
+    }
+
     if (/WHERE\s+out_trade_no\s*=\s*\?/i.test(sql)) {
       return clone(state.orders.find((order) => order.out_trade_no === params[0]));
     }
@@ -177,6 +191,14 @@ function loadAlipayRouterWithMocks(dbMock) {
 
           checkNotifySignV2() {
             return true;
+          }
+
+          exec(method, params) {
+            return Promise.resolve({
+              code: '10000',
+              msg: 'Success',
+              outTradeNo: params.bizContent.out_trade_no
+            });
           }
         }
       };
@@ -279,6 +301,73 @@ test('payment launch smoke: order creation, paid notify, status, duplicate guard
   assert.match(reuseBody.payUrl, /timeout=2h/);
   assert.equal(dbMock.state.orders.length, 1);
 
+  const ordersResponse = await fetch(`${app.baseUrl}/api/alipay/orders?userId=launch-user-001`);
+  const ordersBody = await ordersResponse.json();
+
+  assert.equal(ordersResponse.status, 200);
+  assert.equal(ordersBody.success, true);
+  assert.equal(ordersBody.orders.length, 1);
+  assert.equal(ordersBody.orders[0].status, 'pending_payment');
+  assert.equal(ordersBody.orders[0].outTradeNo, createBody.outTradeNo);
+
+  const continueResponse = await fetch(`${app.baseUrl}/api/alipay/continue-order`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      userId: 'launch-user-001',
+      outTradeNo: createBody.outTradeNo
+    })
+  });
+  const continueBody = await continueResponse.json();
+
+  assert.equal(continueResponse.status, 200);
+  assert.equal(continueBody.success, true);
+  assert.equal(continueBody.reused, true);
+  assert.equal(continueBody.outTradeNo, createBody.outTradeNo);
+  assert.match(continueBody.payUrl, /alipay\.trade\.page\.pay/);
+
+  const cancelCreateResponse = await fetch(`${app.baseUrl}/api/alipay/create-order`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      userId: 'cancel-user-001',
+      planId: 'as_50'
+    })
+  });
+  const cancelCreateBody = await cancelCreateResponse.json();
+
+  assert.equal(cancelCreateResponse.status, 200);
+  assert.equal(cancelCreateBody.success, true);
+
+  const cancelResponse = await fetch(`${app.baseUrl}/api/alipay/cancel-order`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      userId: 'cancel-user-001',
+      outTradeNo: cancelCreateBody.outTradeNo
+    })
+  });
+  const cancelBody = await cancelResponse.json();
+
+  assert.equal(cancelResponse.status, 200);
+  assert.equal(cancelBody.success, true);
+  assert.equal(cancelBody.status, 'closed');
+  assert.equal(dbMock.state.orders.find((order) => order.out_trade_no === cancelCreateBody.outTradeNo).status, 'closed');
+
+  const recreateResponse = await fetch(`${app.baseUrl}/api/alipay/create-order`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      userId: 'cancel-user-001',
+      planId: 'blog_250'
+    })
+  });
+  const recreateBody = await recreateResponse.json();
+
+  assert.equal(recreateResponse.status, 200);
+  assert.equal(recreateBody.success, true);
+  assert.notEqual(recreateBody.outTradeNo, cancelCreateBody.outTradeNo);
+
   const notifyResponse = await fetch(`${app.baseUrl}/api/alipay/notify`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -321,7 +410,7 @@ test('payment launch smoke: order creation, paid notify, status, duplicate guard
   assert.equal(duplicateResponse.status, 409);
   assert.equal(duplicateBody.success, false);
   assert.equal(duplicateBody.code, 'PENDING_FULFILLMENT_EXISTS');
-  assert.equal(dbMock.state.orders.length, 1);
+  assert.equal(dbMock.state.orders.filter((order) => order.user_id === 'launch-user-001').length, 1);
 
   const schemaSql = dbMock.state.executedSql.join('\n');
   assert.match(schemaSql, /COMMENT/);
