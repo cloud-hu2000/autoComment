@@ -6,6 +6,7 @@ const USER_EMAIL_STORAGE_KEY = 'auto_fill_user_email';
 const USER_PASSWORD_STORAGE_KEY = 'auto_fill_user_password';
 const USER_ID_STORAGE_KEY = 'auto_comment_user_id';
 const LEGACY_PROMPT_FIELD_VALUES_STORAGE_KEY = 'auto_fill_prompt_field_values';
+const SHOW_EXPORT_OUTLINKS_FLOATING_BUTTON_STORAGE_KEY = 'show_export_outlinks_floating_button';
 
 const POINTS_API_BASE = 'https://jieyunsang.cn/api';
 const CONFIG_VERSION = 2;
@@ -17,7 +18,8 @@ const ACTIVE_STORAGE_KEYS = [
   USER_NAME_STORAGE_KEY,
   USER_EMAIL_STORAGE_KEY,
   USER_PASSWORD_STORAGE_KEY,
-  USER_ID_STORAGE_KEY
+  USER_ID_STORAGE_KEY,
+  SHOW_EXPORT_OUTLINKS_FLOATING_BUTTON_STORAGE_KEY
 ];
 
 const IMPORT_COMPAT_STORAGE_KEYS = [
@@ -44,6 +46,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const importExportStatus = document.getElementById('importExportStatus');
   const openBatchBtn = document.getElementById('openBatchBtn');
   const openPaymentBtn = document.getElementById('openPaymentBtn');
+  const toggleExportOutlinksFloatingBtn = document.getElementById('toggleExportOutlinksFloatingBtn');
   const purchaseStatusEl = document.getElementById('purchaseStatus');
   const purchasePlanEl = document.getElementById('purchasePlan');
   const purchaseOrderNoEl = document.getElementById('purchaseOrderNo');
@@ -69,6 +72,18 @@ document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => {
       el.style.opacity = '0';
     }, timeout);
+  }
+
+  let showExportOutlinksFloatingButton = true;
+
+  function renderExportOutlinksFloatingToggle() {
+    if (!toggleExportOutlinksFloatingBtn) return;
+    toggleExportOutlinksFloatingBtn.textContent = showExportOutlinksFloatingButton ? '隐藏导出外链按钮' : '显示导出外链按钮';
+    toggleExportOutlinksFloatingBtn.classList.toggle('btn-primary', !showExportOutlinksFloatingButton);
+    toggleExportOutlinksFloatingBtn.classList.toggle('btn-secondary', showExportOutlinksFloatingButton);
+    toggleExportOutlinksFloatingBtn.title = showExportOutlinksFloatingButton
+      ? '点击后页面不再显示“导出外链”浮动按钮'
+      : '点击后页面显示“导出外链”浮动按钮';
   }
 
   function pickLegacyPromptValue(values, keywords) {
@@ -164,6 +179,8 @@ document.addEventListener('DOMContentLoaded', () => {
           fetchPurchaseStatus(data[USER_ID_STORAGE_KEY]);
         }
       }
+      showExportOutlinksFloatingButton = data[SHOW_EXPORT_OUTLINKS_FLOATING_BUTTON_STORAGE_KEY] !== false;
+      renderExportOutlinksFloatingToggle();
     });
   }
 
@@ -265,6 +282,26 @@ document.addEventListener('DOMContentLoaded', () => {
           setPurchaseStatus(null);
         }
       });
+    });
+  }
+
+  if (toggleExportOutlinksFloatingBtn) {
+    renderExportOutlinksFloatingToggle();
+    toggleExportOutlinksFloatingBtn.addEventListener('click', () => {
+      const nextValue = !showExportOutlinksFloatingButton;
+      chrome.storage.sync.set(
+        { [SHOW_EXPORT_OUTLINKS_FLOATING_BUTTON_STORAGE_KEY]: nextValue },
+        () => {
+          if (chrome.runtime.lastError) {
+            console.error('保存导出外链浮动按钮设置失败：', chrome.runtime.lastError);
+            showStatus(settingsStatusEl, '保存失败', 2000);
+            return;
+          }
+          showExportOutlinksFloatingButton = nextValue;
+          renderExportOutlinksFloatingToggle();
+          showStatus(settingsStatusEl, nextValue ? '已显示导出外链按钮' : '已隐藏导出外链按钮');
+        }
+      );
     });
   }
 

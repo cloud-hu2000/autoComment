@@ -365,6 +365,7 @@
   const USER_PASSWORD_STORAGE_KEY = 'auto_fill_user_password';
   const USER_ID_STORAGE_KEY = 'auto_comment_user_id';
   const PROMPT_FIELD_VALUES_STORAGE_KEY = 'auto_fill_prompt_field_values';
+  const SHOW_EXPORT_OUTLINKS_FLOATING_BUTTON_STORAGE_KEY = 'show_export_outlinks_floating_button';
 
   // ====== 批量任务设置（从 storage.local 读取）======
   const BATCH_SETTINGS_KEY = 'batch_task_settings';
@@ -590,6 +591,23 @@
           resolve({ name, email, password });
         }
       );
+    });
+  }
+
+  function getShowExportOutlinksFloatingButtonSetting() {
+    return new Promise((resolve) => {
+      if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.sync) {
+        resolve(true);
+        return;
+      }
+      chrome.storage.sync.get([SHOW_EXPORT_OUTLINKS_FLOATING_BUTTON_STORAGE_KEY], (result) => {
+        if (chrome.runtime && chrome.runtime.lastError) {
+          console.error('读取导出外链浮动按钮设置失败：', chrome.runtime.lastError);
+          resolve(true);
+          return;
+        }
+        resolve(!result || result[SHOW_EXPORT_OUTLINKS_FLOATING_BUTTON_STORAGE_KEY] !== false);
+      });
     });
   }
 
@@ -1238,7 +1256,7 @@
 
     fillInputs();
     setupFormSubmitListener();
-    ensureOutlinkFloatingButton();
+    applyOutlinkFloatingButtonVisibility();
 
     getAutoOpenQwenPanelSetting().then((shouldOpen) => {
       if (shouldOpen) {
@@ -3735,6 +3753,25 @@
     console.log('[AutoComment] 已导出外链 CSV:', { host: csvHost, count: outlinks.length });
   }
 
+  function removeOutlinkFloatingButton() {
+    const existingBtn = document.getElementById('auto-comment-export-outlinks-btn');
+    if (existingBtn) {
+      existingBtn.remove();
+      console.log('[AutoComment] 独立导出外链浮窗按钮已移除');
+    }
+  }
+
+  async function applyOutlinkFloatingButtonVisibility(shouldShow) {
+    const visible = typeof shouldShow === 'boolean'
+      ? shouldShow
+      : await getShowExportOutlinksFloatingButtonSetting();
+    if (visible) {
+      ensureOutlinkFloatingButton();
+    } else {
+      removeOutlinkFloatingButton();
+    }
+  }
+
   function ensureOutlinkFloatingButton() {
     if (document.getElementById('auto-comment-export-outlinks-btn')) {
       return;
@@ -3778,6 +3815,15 @@
 
     (document.body || document.documentElement).appendChild(btn);
     console.log('[AutoComment] 独立导出外链浮窗按钮已注入');
+  }
+
+  if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged) {
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+      if (areaName !== 'sync' || !changes[SHOW_EXPORT_OUTLINKS_FLOATING_BUTTON_STORAGE_KEY]) {
+        return;
+      }
+      applyOutlinkFloatingButtonVisibility(changes[SHOW_EXPORT_OUTLINKS_FLOATING_BUTTON_STORAGE_KEY].newValue !== false);
+    });
   }
 
   // 监听 background.js 中点击扩展图标发送的消息
