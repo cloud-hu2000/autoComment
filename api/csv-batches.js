@@ -21,7 +21,7 @@ const HIGH_AS_EXPORT_BATCH_SIZE = normalizePositiveInteger(process.env.CSV_HIGH_
 const EXPORT_LOCK_NAME = 'csv_batch_export';
 const CSV_STORAGE_DIR = path.resolve(__dirname, '..', 'storage', 'csv-batches');
 const CSV_BATCH_PLAN_ID = 'csv_batch';
-const DEFAULT_BATCH_PRICE = process.env.CSV_BATCH_PRICE || '19.90';
+const DEFAULT_BATCH_PRICE = '39.90';
 
 const EXPORT_SPECS = [
   {
@@ -156,7 +156,7 @@ async function ensureTables() {
             source_end_date DATE NOT NULL,
             source_started_at TIMESTAMP NOT NULL,
             source_ended_at TIMESTAMP NOT NULL,
-            price DECIMAL(10,2) NOT NULL DEFAULT 19.90,
+            price DECIMAL(10,2) NOT NULL DEFAULT 39.90,
             status VARCHAR(32) NOT NULL DEFAULT 'ready',
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -286,7 +286,7 @@ function buildBatchResponse(row, purchase) {
     sourceStartDate: formatDateOnly(row.source_start_date),
     sourceEndDate: formatDateOnly(row.source_end_date),
     rowCount: Number(row.row_count) || 0,
-    price: formatAmount(row.price),
+    price: formatAmount(DEFAULT_BATCH_PRICE),
     status: row.status,
     purchaseStatus: purchase ? 'purchased' : (row.status === 'ready' ? 'available' : row.status),
     createdAt: formatDateTime(row.created_at),
@@ -301,7 +301,7 @@ function getBatchTypeText(batchType) {
 }
 
 function buildPaymentProduct(batch) {
-  const price = formatAmount(batch.price);
+  const price = formatAmount(DEFAULT_BATCH_PRICE);
   const batchTypeText = getBatchTypeText(batch.batch_type);
   return {
     id: CSV_BATCH_PLAN_ID,

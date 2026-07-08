@@ -13,6 +13,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const userIdText = document.getElementById('userIdText');
   const selectedFileText = document.getElementById('selectedFileText');
   const selectedRangeText = document.getElementById('selectedRangeText');
+  const couponCodeInput = document.getElementById('couponCodeInput');
+  const discountAmountText = document.getElementById('discountAmountText');
   const priceText = document.getElementById('priceText');
 
   let currentUserId = '';
@@ -22,6 +24,11 @@ document.addEventListener('DOMContentLoaded', () => {
   let currentOrder = null;
   let countdownTimer = null;
   let loading = false;
+  let quoteTimer = null;
+  let quoteRequestId = 0;
+  let priceQuote = null;
+  let priceQuoteError = '';
+  let priceQuoteLoading = false;
 
   function createTextElement(tagName, className, text) {
     const element = document.createElement(tagName);
@@ -87,6 +94,127 @@ document.addEventListener('DOMContentLoaded', () => {
     return batches.find((batch) => Number(batch.batchId) === Number(order.batchId)) || null;
   }
 
+  function formatMoney(value) {
+    const amount = Number(value);
+    return Number.isFinite(amount) ? amount.toFixed(2) : '0.00';
+  }
+
+  function formatCurrency(value) {
+    return `￥${formatMoney(value)}`;
+  }
+
+  function getCouponCode() {
+    return couponCodeInput ? couponCodeInput.value.trim().toUpperCase() : '';
+  }
+
+  function getCheckoutPricing(batch, order) {
+    if (!batch && !order) return null;
+    const originalAmount = Number((batch && batch.price) || (order && order.amount) || 0);
+    const orderAmount = order && order.amount ? Number(order.amount) : null;
+    const quotedBatchId = priceQuote && Number(priceQuote.batchId) === Number(batch && batch.batchId);
+    const quotedCouponCode = priceQuote && String(priceQuote.couponCode || '') === getCouponCode();
+    if (!Number.isFinite(orderAmount) && quotedBatchId && quotedCouponCode) {
+      return {
+        originalAmount: formatMoney(priceQuote.originalAmount),
+        payableAmount: formatMoney(priceQuote.amount),
+        discountAmount: formatMoney(priceQuote.discountAmount)
+      };
+    }
+
+    const payableAmount = Number.isFinite(orderAmount) ? orderAmount : originalAmount;
+    const discountAmount = Math.max(0, originalAmount - payableAmount);
+    return {
+      originalAmount: formatMoney(originalAmount),
+      payableAmount: formatMoney(payableAmount),
+      discountAmount: formatMoney(discountAmount)
+    };
+  }
+
+  function getMatchingQuote(batch) {
+    if (!batch || !priceQuote) return null;
+    if (Number(priceQuote.batchId) !== Number(batch.batchId)) return null;
+    if (String(priceQuote.couponCode || '') !== getCouponCode()) return null;
+    return priceQuote;
+  }
+
+  function clearQuote() {
+    priceQuote = null;
+    priceQuoteError = '';
+    priceQuoteLoading = false;
+    if (quoteTimer) {
+      clearTimeout(quoteTimer);
+      quoteTimer = null;
+    }
+  }
+
+  function schedulePriceQuote(delay = 250) {
+    if (quoteTimer) {
+      clearTimeout(quoteTimer);
+      quoteTimer = null;
+    }
+
+    priceQuote = null;
+    priceQuoteError = '';
+    const batch = getSelectedBatch();
+    const couponCode = getCouponCode();
+    const samePendingOrder = batch
+      ? pendingOrders.find((order) => Number(order.batchId) === Number(batch.batchId))
+      : null;
+
+    if (!batch || samePendingOrder || isPurchased(batch) || !couponCode) {
+      priceQuoteLoading = false;
+      renderCheckout();
+      return;
+    }
+
+    priceQuoteLoading = true;
+    renderCheckout();
+    const requestId = quoteRequestId + 1;
+    quoteRequestId = requestId;
+    quoteTimer = setTimeout(() => {
+      fetchPriceQuote({ requestId, batchId: batch.batchId, couponCode });
+    }, delay);
+  }
+
+  async function fetchPriceQuote({ requestId, batchId, couponCode }) {
+    try {
+      const response = await fetch(`${API_BASE}/alipay/quote-order`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          batchId,
+          couponCode
+        })
+      });
+      const data = await response.json();
+      if (requestId !== quoteRequestId) return;
+
+      if (!response.ok || !data.success) {
+        priceQuote = null;
+        priceQuoteError = response.status === 404
+          ? '后端报价接口未部署或服务未更新'
+          : (data.message || data.error || '优惠码无效');
+        return;
+      }
+
+      priceQuote = {
+        ...data.plan,
+        batchId: data.plan.batchId || batchId
+      };
+      priceQuoteError = '';
+    } catch (error) {
+      if (requestId !== quoteRequestId) return;
+      console.error('查询优惠码报价失败', error);
+      priceQuote = null;
+      priceQuoteError = '优惠码校验失败，请稍后重试';
+    } finally {
+      if (requestId === quoteRequestId) {
+        priceQuoteLoading = false;
+        renderCheckout();
+      }
+    }
+  }
+
   function stopCountdown() {
     if (countdownTimer) {
       clearInterval(countdownTimer);
@@ -122,6 +250,9 @@ document.addEventListener('DOMContentLoaded', () => {
     payBtn.disabled = disabled;
     refreshBatchesBtn.disabled = disabled;
     refreshOrdersBtn.disabled = disabled;
+    if (couponCodeInput) {
+      couponCodeInput.disabled = disabled;
+    }
     batchList.querySelectorAll('button').forEach((button) => {
       button.disabled = disabled;
     });
@@ -132,9 +263,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function renderCheckout() {
     const batch = getSelectedBatch();
+    const samePendingOrder = batch
+      ? pendingOrders.find((order) => Number(order.batchId) === Number(batch.batchId))
+      : null;
+    const pricing = getCheckoutPricing(batch, samePendingOrder);
     selectedFileText.textContent = batch ? batch.fileName : '未选择';
     selectedRangeText.textContent = batch ? batch.dateRangeText : '-';
-    priceText.textContent = batch ? `￥${batch.price}` : '-';
+    discountAmountText.textContent = pricing ? formatCurrency(pricing.discountAmount) : '-';
+    priceText.textContent = pricing ? formatCurrency(pricing.payableAmount) : '-';
 
     if (!currentUserId) {
       payBtn.disabled = true;
@@ -164,10 +300,34 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    const samePendingOrder = pendingOrders.find((order) => Number(order.batchId) === Number(batch.batchId));
+    const couponCode = getCouponCode();
+    const matchingQuote = getMatchingQuote(batch);
+    if (!samePendingOrder && couponCode && priceQuoteLoading) {
+      payBtn.disabled = true;
+      payBtn.textContent = '支付宝支付';
+      setStatus('正在校验优惠码...');
+      return;
+    }
+
+    if (!samePendingOrder && couponCode && priceQuoteError) {
+      payBtn.disabled = true;
+      payBtn.textContent = '支付宝支付';
+      setStatus(priceQuoteError, true);
+      return;
+    }
+
+    if (!samePendingOrder && couponCode && !matchingQuote) {
+      payBtn.disabled = true;
+      payBtn.textContent = '支付宝支付';
+      setStatus('正在校验优惠码...');
+      return;
+    }
+
     payBtn.disabled = false;
     payBtn.textContent = samePendingOrder ? '继续支付' : '支付宝支付';
-    setStatus(`${batch.fileName}，${batch.rowCount} 条，￥${batch.price}。`);
+    setStatus(samePendingOrder
+      ? `你有一笔未支付订单，金额 ${formatCurrency(pricing.payableAmount)}，点击继续支付。`
+      : `${batch.fileName}，${batch.rowCount} 条，应付 ${formatCurrency(pricing.payableAmount)}。`);
   }
 
   function renderBatchList() {
@@ -299,7 +459,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function selectBatch(batchId) {
     selectedBatchId = Number(batchId);
+    clearQuote();
     renderBatchList();
+    schedulePriceQuote(0);
   }
 
   function chooseDefaultBatch() {
@@ -329,6 +491,7 @@ document.addEventListener('DOMContentLoaded', () => {
       batches = data.batches || [];
       chooseDefaultBatch();
       renderBatchList();
+      schedulePriceQuote(0);
     } catch (error) {
       console.error('查询 CSV 列表失败', error);
       setEmpty(batchList, '网络错误，查询 CSV 列表失败。');
@@ -350,6 +513,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
       renderPendingOrders(data.orders || []);
+      schedulePriceQuote(0);
     } catch (error) {
       console.error('查询订单列表失败', error);
       setEmpty(pendingOrdersList, '网络错误，查询订单失败。');
@@ -486,6 +650,24 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
+    const couponCode = getCouponCode();
+    if (couponCode && priceQuoteLoading) {
+      setStatus('正在校验优惠码，请稍后再支付。', true);
+      renderCheckout();
+      return;
+    }
+    if (couponCode && priceQuoteError) {
+      setStatus(priceQuoteError, true);
+      renderCheckout();
+      return;
+    }
+    if (couponCode && !getMatchingQuote(batch)) {
+      schedulePriceQuote(0);
+      setStatus('正在校验优惠码，请稍后再支付。', true);
+      renderCheckout();
+      return;
+    }
+
     setButtonsDisabled(true);
     setStatus('正在创建支付宝订单...');
     try {
@@ -494,7 +676,8 @@ document.addEventListener('DOMContentLoaded', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userId: currentUserId,
-          batchId: batch.batchId
+          batchId: batch.batchId,
+          couponCode
         })
       });
       const data = await response.json();
@@ -535,6 +718,12 @@ document.addEventListener('DOMContentLoaded', () => {
   refreshBatchesBtn.addEventListener('click', loadBatches);
   refreshOrdersBtn.addEventListener('click', loadPendingOrders);
   payBtn.addEventListener('click', createPaymentForSelectedBatch);
+  if (couponCodeInput) {
+    couponCodeInput.addEventListener('input', () => {
+      couponCodeInput.value = couponCodeInput.value.toUpperCase();
+      schedulePriceQuote();
+    });
+  }
 
   batchList.addEventListener('click', (event) => {
     const button = event.target.closest('button[data-batch-action]');

@@ -4,3 +4,14 @@
 
 # Generated CSV inventory for automatic paid fulfillment.
 /storage/csv-batches/
+
+# Local development dependencies and editor state.
+/node_modules/
+/.idea/
+
+# Generated extension bundles.
+/dist/*.zip
+/dist/auto-comment-plugin/
+
+# Local scratch files.
+/commit_msg.txt

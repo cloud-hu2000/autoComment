@@ -345,6 +345,37 @@ test('payment launch smoke: order creation, paid notify, status, duplicate guard
     await app.close();
   });
 
+  const quoteResponse = await fetch(`${app.baseUrl}/api/alipay/quote-order`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      planId: 'blog_250',
+      couponCode: 'GEFEI'
+    })
+  });
+  const quoteBody = await quoteResponse.json();
+
+  assert.equal(quoteResponse.status, 200);
+  assert.equal(quoteBody.success, true);
+  assert.equal(quoteBody.plan.amount, '19.90');
+  assert.equal(quoteBody.plan.originalAmount, '39.90');
+  assert.equal(quoteBody.plan.discountAmount, '20.00');
+  assert.equal(quoteBody.plan.couponCode, 'GEFEI');
+
+  const invalidQuoteResponse = await fetch(`${app.baseUrl}/api/alipay/quote-order`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      planId: 'blog_250',
+      couponCode: 'NOPE'
+    })
+  });
+  const invalidQuoteBody = await invalidQuoteResponse.json();
+
+  assert.equal(invalidQuoteResponse.status, 400);
+  assert.equal(invalidQuoteBody.success, false);
+  assert.equal(invalidQuoteBody.code, 'INVALID_COUPON');
+
   const createResponse = await fetch(`${app.baseUrl}/api/alipay/create-order`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -360,6 +391,7 @@ test('payment launch smoke: order creation, paid notify, status, duplicate guard
   assert.match(createBody.outTradeNo, /^AC\d{14}[A-Z0-9]{6}$/);
   assert.equal(createBody.env, 'sandbox');
   assert.equal(createBody.plan.id, 'blog_250');
+  assert.equal(createBody.plan.amount, '39.90');
   assert.match(createBody.payUrl, /https:\/\/pay\.example\.test\/alipay\.trade\.page\.pay/);
   assert.match(createBody.payUrl, /timeout=2h/);
   assert.equal(createBody.remainingSeconds, 7200);
@@ -369,7 +401,7 @@ test('payment launch smoke: order creation, paid notify, status, duplicate guard
   assert.equal(insertedOrder.user_id, 'launch-user-001');
   assert.equal(insertedOrder.plan_id, 'blog_250');
   assert.equal(insertedOrder.status, 'pending_payment');
-  assert.equal(String(insertedOrder.amount), '19.90');
+  assert.equal(String(insertedOrder.amount), '39.90');
 
   const reuseResponse = await fetch(`${app.baseUrl}/api/alipay/create-order`, {
     method: 'POST',
@@ -421,13 +453,19 @@ test('payment launch smoke: order creation, paid notify, status, duplicate guard
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       userId: 'cancel-user-001',
-      planId: 'as_50'
+      planId: 'as_50',
+      couponCode: 'BEST-FRIEND'
     })
   });
   const cancelCreateBody = await cancelCreateResponse.json();
 
   assert.equal(cancelCreateResponse.status, 200);
   assert.equal(cancelCreateBody.success, true);
+  assert.equal(cancelCreateBody.plan.amount, '9.90');
+  assert.equal(cancelCreateBody.plan.originalAmount, '39.90');
+  assert.equal(cancelCreateBody.plan.discountAmount, '30.00');
+  assert.equal(cancelCreateBody.plan.couponCode, 'BEST-FRIEND');
+  assert.match(cancelCreateBody.payUrl, /amount=9\.90/);
 
   const cancelResponse = await fetch(`${app.baseUrl}/api/alipay/cancel-order`, {
     method: 'POST',
@@ -457,6 +495,22 @@ test('payment launch smoke: order creation, paid notify, status, duplicate guard
   assert.equal(recreateResponse.status, 200);
   assert.equal(recreateBody.success, true);
   assert.notEqual(recreateBody.outTradeNo, cancelCreateBody.outTradeNo);
+  assert.equal(recreateBody.plan.amount, '39.90');
+
+  const invalidCouponResponse = await fetch(`${app.baseUrl}/api/alipay/create-order`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      userId: 'invalid-coupon-user-001',
+      planId: 'blog_250',
+      couponCode: 'NOPE'
+    })
+  });
+  const invalidCouponBody = await invalidCouponResponse.json();
+
+  assert.equal(invalidCouponResponse.status, 400);
+  assert.equal(invalidCouponBody.success, false);
+  assert.equal(invalidCouponBody.code, 'INVALID_COUPON');
 
   const notifyResponse = await fetch(`${app.baseUrl}/api/alipay/notify`, {
     method: 'POST',
@@ -465,7 +519,7 @@ test('payment launch smoke: order creation, paid notify, status, duplicate guard
       app_id: 'test-app-id',
       out_trade_no: createBody.outTradeNo,
       trade_no: '2026062722000000000001',
-      total_amount: '19.90',
+      total_amount: '39.90',
       trade_status: 'TRADE_SUCCESS'
     })
   });
@@ -541,7 +595,7 @@ test('csv batch payment grants download access idempotently', async (t) => {
     source_end_date: new Date('2026-07-01T00:00:00.000Z'),
     source_started_at: new Date('2026-06-01T08:00:00.000Z'),
     source_ended_at: new Date('2026-07-01T08:00:00.000Z'),
-    price: '19.90',
+    price: '39.90',
     status: 'ready',
     created_at: new Date('2026-07-04T02:00:00.000Z'),
     updated_at: new Date('2026-07-04T02:00:00.000Z')
@@ -558,7 +612,8 @@ test('csv batch payment grants download access idempotently', async (t) => {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       userId: 'csv-user-001',
-      batchId: 88
+      batchId: 88,
+      couponCode: 'GEFEI'
     })
   });
   const createBody = await createResponse.json();
@@ -569,12 +624,16 @@ test('csv batch payment grants download access idempotently', async (t) => {
   assert.equal(createBody.plan.batchId, 88);
   assert.equal(createBody.plan.name, 'blogs_20260601_20260701.csv');
   assert.equal(createBody.plan.amount, '19.90');
+  assert.equal(createBody.plan.originalAmount, '39.90');
+  assert.equal(createBody.plan.discountAmount, '20.00');
+  assert.equal(createBody.plan.couponCode, 'GEFEI');
 
   const order = dbMock.state.orders.find((item) => item.out_trade_no === createBody.outTradeNo);
   assert.equal(order.user_id, 'csv-user-001');
   assert.equal(order.plan_id, 'csv_batch');
   assert.equal(order.batch_id, 88);
   assert.equal(order.status, 'pending_payment');
+  assert.equal(String(order.amount), '19.90');
 
   const notifyBody = {
     app_id: 'test-app-id',

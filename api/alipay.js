@@ -12,19 +12,31 @@ const PAID_TRADE_STATUSES = ['TRADE_SUCCESS', 'TRADE_FINISHED'];
 const PAYMENT_TIMEOUT_EXPRESS = '2h';
 const PAYMENT_TIMEOUT_SECONDS = 2 * 60 * 60;
 const PAYMENT_TIMEOUT_MS = PAYMENT_TIMEOUT_SECONDS * 1000;
+const DEFAULT_PAYMENT_ORDER_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
+const STANDARD_PRODUCT_AMOUNT = '39.90';
+const COUPONS = {
+  GEFEI: {
+    code: 'GEFEI',
+    finalAmount: '19.90'
+  },
+  'BEST-FRIEND': {
+    code: 'BEST-FRIEND',
+    finalAmount: '9.90'
+  }
+};
 
 const PLANS = {
   blog_250: {
     id: 'blog_250',
     name: '博客列表基础包',
-    amount: '19.90',
+    amount: STANDARD_PRODUCT_AMOUNT,
     subject: 'AutoComment 博客列表基础包',
     body: '250条博客列表，最终转化率5%~10%'
   },
   as_50: {
     id: 'as_50',
     name: '高 AS 博客精选包',
-    amount: '19.90',
+    amount: STANDARD_PRODUCT_AMOUNT,
     subject: 'AutoComment 高 AS 博客精选包',
     body: '50条 AS评分>50 的博客列表'
   }
@@ -42,6 +54,8 @@ const STATUS_TEXT = {
 let tablesReadyPromise = null;
 let sdkInstance = null;
 let sdkConfigFingerprint = '';
+let cleanupSchedulerStarted = false;
+let cleanupSchedulerTimer = null;
 
 function getAlipayEnv() {
   return String(process.env.ALIPAY_ENV || 'sandbox').trim().toLowerCase() === 'production'
@@ -318,18 +332,71 @@ function getPlan(planId) {
   return PLANS[planId] || null;
 }
 
+function formatAmount(value) {
+  const amount = Number(value);
+  return Number.isFinite(amount) ? amount.toFixed(2) : String(value || '0.00');
+}
+
+function normalizeCouponCode(value) {
+  return typeof value === 'string' ? value.trim().toUpperCase() : '';
+}
+
+function getCoupon(rawCode) {
+  const code = normalizeCouponCode(rawCode);
+  return code ? COUPONS[code] || null : null;
+}
+
+function applyCouponToProduct(product, rawCouponCode) {
+  const couponCode = normalizeCouponCode(rawCouponCode);
+  const originalAmount = formatAmount(product.amount);
+  if (!couponCode) {
+    return {
+      ...product,
+      originalAmount,
+      discountAmount: '0.00',
+      couponCode: ''
+    };
+  }
+
+  const coupon = getCoupon(couponCode);
+  if (!coupon) {
+    const error = new Error('优惠码无效');
+    error.statusCode = 400;
+    error.code = 'INVALID_COUPON';
+    throw error;
+  }
+
+  const baseAmount = Number(originalAmount);
+  const finalAmount = Math.min(baseAmount, Number(coupon.finalAmount));
+  const discountAmount = Math.max(0, baseAmount - finalAmount);
+  return {
+    ...product,
+    amount: formatAmount(finalAmount),
+    originalAmount,
+    discountAmount: formatAmount(discountAmount),
+    couponCode: coupon.code
+  };
+}
+
 function normalizeBatchId(value) {
   const id = Number(value);
   return Number.isInteger(id) && id > 0 ? id : 0;
 }
 
 async function getOrderPaymentProduct(order) {
+  let product = null;
   if (order && order.batch_id) {
     const batch = await csvBatches.getBatchById(order.batch_id);
     if (!batch) return null;
-    return csvBatches.buildPaymentProduct(batch);
+    product = csvBatches.buildPaymentProduct(batch);
+  } else {
+    product = order ? getPlan(order.plan_id) : null;
   }
-  return order ? getPlan(order.plan_id) : null;
+  if (!product) return null;
+  return {
+    ...product,
+    amount: formatAmount(order.amount || product.amount)
+  };
 }
 
 function formatDate(value) {
@@ -374,6 +441,7 @@ function buildPurchaseStatus(row) {
     planName: plan ? plan.name : row.subject || row.plan_id,
     batchId: row.batch_id || null,
     outTradeNo: row.out_trade_no,
+    amount: formatAmount(row.amount),
     paidAt: formatDate(row.paid_at),
     fulfilledAt: formatDate(row.fulfilled_at),
     createdAt: formatDate(row.created_at),
@@ -407,6 +475,60 @@ async function closeExpiredPendingOrders(userId) {
     `,
     [userId]
   );
+}
+
+async function closeAllExpiredPendingOrders() {
+  const result = await execute(
+    `
+      UPDATE payment_orders
+      SET status = 'closed',
+          updated_at = NOW()
+      WHERE status = 'pending_payment'
+        AND created_at < DATE_SUB(NOW(), INTERVAL 2 HOUR)
+    `,
+    []
+  );
+  return Number(result && (result.affectedRows || result.changes || 0)) || 0;
+}
+
+function getPaymentOrderCleanupIntervalMs() {
+  const configured = Number(process.env.PAYMENT_ORDER_CLEANUP_INTERVAL_MS);
+  if (Number.isFinite(configured) && configured >= 60 * 1000) {
+    return configured;
+  }
+  return DEFAULT_PAYMENT_ORDER_CLEANUP_INTERVAL_MS;
+}
+
+function scheduleNextPaymentOrderCleanup() {
+  cleanupSchedulerTimer = setTimeout(async () => {
+    try {
+      await ensureTables();
+      const closedCount = await closeAllExpiredPendingOrders();
+      if (closedCount > 0) {
+        console.info('[alipay] closed expired pending payment orders:', closedCount);
+      }
+    } catch (error) {
+      console.error('[alipay] payment order cleanup failed:', error);
+    } finally {
+      scheduleNextPaymentOrderCleanup();
+    }
+  }, getPaymentOrderCleanupIntervalMs());
+
+  if (cleanupSchedulerTimer.unref) {
+    cleanupSchedulerTimer.unref();
+  }
+}
+
+function startPaymentOrderCleanupScheduler() {
+  if (
+    cleanupSchedulerStarted ||
+    String(process.env.PAYMENT_ORDER_CLEANUP_SCHEDULER || 'on').toLowerCase() === 'off'
+  ) {
+    return;
+  }
+
+  cleanupSchedulerStarted = true;
+  scheduleNextPaymentOrderCleanup();
 }
 
 async function findOrderForUser(userId, outTradeNo) {
@@ -520,8 +642,74 @@ async function closeAlipayTrade(outTradeNo) {
   });
 }
 
+async function getProductForOrderRequest({ planId, batchId }) {
+  const normalizedBatchId = normalizeBatchId(batchId);
+
+  if (typeof batchId !== 'undefined' && batchId !== null && batchId !== '') {
+    if (!normalizedBatchId) {
+      const error = new Error('无效的 CSV 文件');
+      error.statusCode = 400;
+      error.code = 'INVALID_CSV_BATCH';
+      throw error;
+    }
+
+    const batch = await csvBatches.getReadyBatchForPurchase(normalizedBatchId);
+    if (!batch) {
+      const error = new Error('CSV 文件不存在或已下架');
+      error.statusCode = 404;
+      error.code = 'CSV_BATCH_NOT_AVAILABLE';
+      throw error;
+    }
+
+    return {
+      product: csvBatches.buildPaymentProduct(batch),
+      orderBatchId: normalizedBatchId
+    };
+  }
+
+  const product = getPlan(planId);
+  if (!product) {
+    const error = new Error('无效的套餐');
+    error.statusCode = 400;
+    error.code = 'INVALID_PLAN';
+    throw error;
+  }
+
+  return {
+    product,
+    orderBatchId: null
+  };
+}
+
+async function quoteOrder(req, res) {
+  const { planId, batchId, couponCode } = req.body || {};
+
+  try {
+    const { product } = await getProductForOrderRequest({ planId, batchId });
+    const pricedProduct = applyCouponToProduct(product, couponCode);
+    return res.status(200).json({
+      success: true,
+      plan: {
+        id: pricedProduct.id,
+        name: pricedProduct.name,
+        amount: pricedProduct.amount,
+        originalAmount: pricedProduct.originalAmount,
+        discountAmount: pricedProduct.discountAmount,
+        couponCode: pricedProduct.couponCode,
+        batchId: pricedProduct.batchId || null
+      }
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 400).json({
+      success: false,
+      code: error.code || 'QUOTE_FAILED',
+      message: error.message || '报价失败'
+    });
+  }
+}
+
 async function createOrder(req, res) {
-  const { userId, planId, batchId } = req.body || {};
+  const { userId, planId, batchId, couponCode } = req.body || {};
 
   if (!userId || typeof userId !== 'string') {
     return res.status(400).json({ success: false, error: '缺少 userId 参数' });
@@ -571,6 +759,16 @@ async function createOrder(req, res) {
     if (!product) {
       return res.status(400).json({ success: false, error: '无效的套餐' });
     }
+  }
+
+  try {
+    product = applyCouponToProduct(product, couponCode);
+  } catch (error) {
+    return res.status(error.statusCode || 400).json({
+      success: false,
+      code: error.code || 'INVALID_COUPON',
+      message: error.message || '优惠码无效'
+    });
   }
 
   let conn = null;
@@ -647,6 +845,9 @@ async function createOrder(req, res) {
           id: activeProduct.id,
           name: activeProduct.name,
           amount: activeProduct.amount,
+          originalAmount: activeProduct.amount,
+          discountAmount: '0.00',
+          couponCode: '',
           batchId: activeProduct.batchId || null
         }
       });
@@ -685,6 +886,9 @@ async function createOrder(req, res) {
         id: product.id,
         name: product.name,
         amount: product.amount,
+        originalAmount: product.originalAmount,
+        discountAmount: product.discountAmount,
+        couponCode: product.couponCode,
         batchId: product.batchId || null
       }
     });
@@ -766,6 +970,9 @@ async function continueOrder(req, res) {
         id: plan.id,
         name: plan.name,
         amount: plan.amount,
+        originalAmount: plan.amount,
+        discountAmount: '0.00',
+        couponCode: '',
         batchId: plan.batchId || null
       }
     });
@@ -1059,6 +1266,7 @@ function configDiagnostics(req, res) {
 }
 
 router.post('/alipay/create-order', createOrder);
+router.post('/alipay/quote-order', quoteOrder);
 router.post('/alipay/continue-order', continueOrder);
 router.post('/alipay/cancel-order', cancelOrder);
 router.post('/alipay/notify', handleNotify);
@@ -1069,6 +1277,8 @@ router.get('/alipay/orders', listOrders);
 
 router.ensureTables = ensureTables;
 router.logConfigDiagnostics = logConfigDiagnostics;
+router.closeAllExpiredPendingOrders = closeAllExpiredPendingOrders;
+router.startPaymentOrderCleanupScheduler = startPaymentOrderCleanupScheduler;
 router.PLANS = PLANS;
 router.STATUS_TEXT = STATUS_TEXT;
 

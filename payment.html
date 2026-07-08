@@ -224,6 +224,25 @@
         overflow-wrap: anywhere;
       }
 
+      .coupon-input {
+        width: min(180px, 100%);
+        padding: 8px 10px;
+        border: 1px solid #d1d5db;
+        border-radius: 8px;
+        font: inherit;
+        font-size: 13px;
+        font-weight: 700;
+        color: #111827;
+        text-align: right;
+        text-transform: uppercase;
+        outline: none;
+      }
+
+      .coupon-input:focus {
+        border-color: #1677ff;
+        box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.12);
+      }
+
       .pay-box {
         margin-top: 14px;
         padding: 16px;
@@ -319,6 +338,14 @@
           <div class="checkout-row">
             <span class="checkout-label">数据范围</span>
             <span class="checkout-value" id="selectedRangeText">-</span>
+          </div>
+          <div class="checkout-row">
+            <label class="checkout-label" for="couponCodeInput">优惠码</label>
+            <input class="coupon-input" id="couponCodeInput" type="text" placeholder="（可选）" autocomplete="off" />
+          </div>
+          <div class="checkout-row">
+            <span class="checkout-label">优惠金额</span>
+            <span class="checkout-value" id="discountAmountText">-</span>
           </div>
           <div class="checkout-row">
             <span class="checkout-label">应付金额</span>

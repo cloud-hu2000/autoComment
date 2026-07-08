@@ -65,5 +65,6 @@ app.listen(PORT, () => {
   csvBatchesRouter.ensureTables().catch((err) => {
     console.error('[Server] csv batch tables init failed:', err);
   });
+  alipayRouter.startPaymentOrderCleanupScheduler();
   csvBatchesRouter.startScheduler();
 });
