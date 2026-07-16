@@ -102,6 +102,7 @@ const batchAutoSubmit = document.getElementById('batchAutoSubmit');
 // ==================== 批量任务设置存储键 ====================
 const BATCH_SETTINGS_KEY = 'batch_task_settings';
 const BATCH_URLS_KEY = 'batch_task_urls';
+const BATCH_DOMAIN_BLACKLIST = ['nsfw-ai.net'];
 
 // 全局勾选框设置的 storage.sync 键
 const BATCH_CHECKBOX_SETTINGS_KEY = 'batch_checkbox_settings';
@@ -365,6 +366,7 @@ function parseCSV(raw, fileNameParam) {
   let validCount = 0;
   let invalidCount = 0;
   let illegalCount = 0;
+  let blacklistedCount = 0;
   parsedUrls = [];
   urlPreviewBody.innerHTML = '';
 
@@ -384,6 +386,11 @@ function parseCSV(raw, fileNameParam) {
 
     if (!isValidUrl(url)) {
       invalidCount++;
+      continue;
+    }
+
+    if (isBatchDomainBlacklisted(url, sourceDomain)) {
+      blacklistedCount++;
       continue;
     }
 
@@ -430,6 +437,7 @@ function parseCSV(raw, fileNameParam) {
   fileCount.textContent = `共 ${validCount} 条 URL`;
   if (invalidCount > 0) fileCount.textContent += `（跳过 ${invalidCount} 条无效）`;
   if (illegalCount > 0) fileCount.textContent += `（非法拦截 ${illegalCount} 条）`;
+  if (blacklistedCount > 0) fileCount.textContent += `（跳过 ${blacklistedCount} 条黑名单域名）`;
   if (duplicateCount > 0) {
     fileCount.textContent += `（发现 ${duplicateCount} 条重复）`;
     document.getElementById('duplicateCount').textContent = `⚠️ ${duplicateCount} 条重复`;
@@ -1329,6 +1337,32 @@ function extractDomain(url) {
   }
 }
 
+function normalizeBatchDomain(value) {
+  const text = String(value || '').trim().toLowerCase();
+  if (!text) return '';
+
+  try {
+    const url = /^https?:\/\//i.test(text) ? text : `https://${text}`;
+    return new URL(url).hostname.replace(/^www\./i, '');
+  } catch {
+    return text.replace(/^www\./i, '').split('/')[0].split(':')[0];
+  }
+}
+
+function isDomainBlacklisted(domain) {
+  const normalized = normalizeBatchDomain(domain);
+  if (!normalized) return false;
+
+  return BATCH_DOMAIN_BLACKLIST.some((blockedDomain) => {
+    const blocked = normalizeBatchDomain(blockedDomain);
+    return normalized === blocked || normalized.endsWith(`.${blocked}`);
+  });
+}
+
+function isBatchDomainBlacklisted(url, sourceDomain) {
+  return isDomainBlacklisted(extractDomain(url)) || isDomainBlacklisted(sourceDomain);
+}
+
 function filterTimeBucket(elapsedSecs) {
   const sel = filterTimeRange.value;
   if (sel === 'all') return true;
@@ -1388,12 +1422,40 @@ function renderStats() {
   statsTableBody.innerHTML = '';
   for (const r of filtered) {
     const tr = document.createElement('tr');
-    tr.className = 'url-' + r.result;
+    tr.className = `url-${r.result}`;
 
     const elapsedStr = r.elapsed != null ? r.elapsed + 's' : '—';
     const timeStr = r.timestamp ? formatTime(new Date(r.timestamp)) : '—';
-    const domain = extractDomain(r.url);
     const shortUrl = r.url.length > 40 ? r.url.substring(0, 37) + '…' : r.url;
+
+    const indexCell = document.createElement('td');
+    indexCell.textContent = r.originalIndex + 1;
+    indexCell.style.color = '#9ca3af';
+    indexCell.style.textAlign = 'center';
+    tr.appendChild(indexCell);
+
+    const urlCell = document.createElement('td');
+    urlCell.textContent = shortUrl;
+    urlCell.title = r.url;
+    tr.appendChild(urlCell);
+
+    const resultCell = document.createElement('td');
+    const resultBadge = document.createElement('span');
+    resultBadge.className = `result-badge ${r.result}`;
+    resultBadge.textContent = getResultText(r.result);
+    resultCell.appendChild(resultBadge);
+    tr.appendChild(resultCell);
+
+    const errCell = document.createElement('td');
+    if (r.errorMessage) {
+      errCell.className = 'error-cell';
+      errCell.textContent = r.errorMessage;
+      errCell.title = r.errorMessage;
+    } else {
+      errCell.textContent = '—';
+      errCell.style.color = '#d1d5db';
+    }
+    tr.appendChild(errCell);
 
     const aiCell = document.createElement('td');
     if (r.aiContent) {
@@ -1407,30 +1469,21 @@ function renderStats() {
       aiCell.textContent = '—';
       aiCell.style.color = '#d1d5db';
     }
-
-    tr.innerHTML = `
-      <td style="color:#9ca3af;width:40px;text-align:center;">${r.originalIndex + 1}</td>
-      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(r.url)}">${escapeHtml(shortUrl)}</td>
-      <td><span class="result-badge ${r.result}">${getResultText(r.result)}</span></td>
-    `;
-    tr.className = `url-${r.result}`;
-
-    const errCell = document.createElement('td');
-    if (r.errorMessage) {
-      errCell.className = 'error-cell';
-      errCell.textContent = r.errorMessage;
-      errCell.title = r.errorMessage;
-    } else {
-      errCell.textContent = '—';
-      errCell.style.color = '#d1d5db';
-    }
-    tr.appendChild(errCell);
     tr.appendChild(aiCell);
 
-    tr.innerHTML += `
-      <td style="font-size:11px;color:#9ca3af;white-space:nowrap;">${elapsedStr}</td>
-      <td style="font-size:11px;color:#9ca3af;white-space:nowrap;">${timeStr}</td>
-    `;
+    const elapsedCell = document.createElement('td');
+    elapsedCell.textContent = elapsedStr;
+    elapsedCell.style.fontSize = '11px';
+    elapsedCell.style.color = '#9ca3af';
+    elapsedCell.style.whiteSpace = 'nowrap';
+    tr.appendChild(elapsedCell);
+
+    const timeCell = document.createElement('td');
+    timeCell.textContent = timeStr;
+    timeCell.style.fontSize = '11px';
+    timeCell.style.color = '#9ca3af';
+    timeCell.style.whiteSpace = 'nowrap';
+    tr.appendChild(timeCell);
 
     statsTableBody.appendChild(tr);
   }

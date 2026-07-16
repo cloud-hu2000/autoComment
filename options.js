@@ -149,6 +149,92 @@ document.addEventListener('DOMContentLoaded', () => {
     return config;
   }
 
+  function normalizeStringSetting(value) {
+    if (value === undefined || value === null) return '';
+    return String(value).trim();
+  }
+
+  function getSettingsPayloadFromInputs() {
+    return {
+      [WEBSITE_URL_STORAGE_KEY]: normalizeStringSetting(websiteUrlInput.value),
+      [WEBSITE_CONTENT_STORAGE_KEY]: normalizeStringSetting(websiteContentInput.value),
+      [USER_NAME_STORAGE_KEY]: normalizeStringSetting(userNameInput.value),
+      [USER_EMAIL_STORAGE_KEY]: normalizeStringSetting(userEmailInput.value),
+      [USER_PASSWORD_STORAGE_KEY]: normalizeStringSetting(userPasswordInput.value)
+    };
+  }
+
+  function applySettingsToForm(data) {
+    if (!data || typeof data !== 'object') return;
+
+    if (data[WEBSITE_URL_STORAGE_KEY] !== undefined) {
+      websiteUrlInput.value = normalizeStringSetting(data[WEBSITE_URL_STORAGE_KEY]);
+    }
+    if (data[WEBSITE_CONTENT_STORAGE_KEY] !== undefined) {
+      websiteContentInput.value = normalizeStringSetting(data[WEBSITE_CONTENT_STORAGE_KEY]);
+    }
+    if (data[USER_NAME_STORAGE_KEY] !== undefined) {
+      userNameInput.value = normalizeStringSetting(data[USER_NAME_STORAGE_KEY]);
+    }
+    if (data[USER_EMAIL_STORAGE_KEY] !== undefined) {
+      userEmailInput.value = normalizeStringSetting(data[USER_EMAIL_STORAGE_KEY]);
+    }
+    if (data[USER_PASSWORD_STORAGE_KEY] !== undefined) {
+      userPasswordInput.value = normalizeStringSetting(data[USER_PASSWORD_STORAGE_KEY]);
+    }
+    if (userIdInput && data[USER_ID_STORAGE_KEY] !== undefined) {
+      userIdInput.value = normalizeStringSetting(data[USER_ID_STORAGE_KEY]);
+    }
+    if (data[SHOW_EXPORT_OUTLINKS_FLOATING_BUTTON_STORAGE_KEY] !== undefined) {
+      showExportOutlinksFloatingButton = data[SHOW_EXPORT_OUTLINKS_FLOATING_BUTTON_STORAGE_KEY] !== false;
+      renderExportOutlinksFloatingToggle();
+    }
+  }
+
+  function buildImportPayload(importedData) {
+    const toSave = {};
+
+    IMPORT_COMPAT_STORAGE_KEYS.forEach((key) => {
+      if (importedData[key] !== undefined) {
+        toSave[key] = importedData[key];
+      }
+    });
+
+    [
+      WEBSITE_URL_STORAGE_KEY,
+      WEBSITE_CONTENT_STORAGE_KEY,
+      USER_NAME_STORAGE_KEY,
+      USER_EMAIL_STORAGE_KEY,
+      USER_PASSWORD_STORAGE_KEY,
+      USER_ID_STORAGE_KEY
+    ].forEach((key) => {
+      if (importedData[key] !== undefined) {
+        toSave[key] = normalizeStringSetting(importedData[key]);
+      }
+    });
+
+    if (!toSave[WEBSITE_URL_STORAGE_KEY]) {
+      const legacyWebsiteUrl = getLegacyWebsiteUrl(importedData);
+      if (legacyWebsiteUrl) {
+        toSave[WEBSITE_URL_STORAGE_KEY] = legacyWebsiteUrl;
+      }
+    }
+
+    if (!toSave[WEBSITE_CONTENT_STORAGE_KEY]) {
+      const legacyWebsiteContent = getLegacyWebsiteContent(importedData);
+      if (legacyWebsiteContent) {
+        toSave[WEBSITE_CONTENT_STORAGE_KEY] = legacyWebsiteContent;
+      }
+    }
+
+    if (importedData[SHOW_EXPORT_OUTLINKS_FLOATING_BUTTON_STORAGE_KEY] !== undefined) {
+      toSave[SHOW_EXPORT_OUTLINKS_FLOATING_BUTTON_STORAGE_KEY] =
+        importedData[SHOW_EXPORT_OUTLINKS_FLOATING_BUTTON_STORAGE_KEY] !== false;
+    }
+
+    return toSave;
+  }
+
   function loadSettings() {
     chrome.storage.sync.get(IMPORT_COMPAT_STORAGE_KEYS, (result) => {
       if (chrome.runtime.lastError) {
@@ -226,13 +312,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     chrome.storage.sync.set(
-      {
-        [WEBSITE_URL_STORAGE_KEY]: websiteUrlInput.value.trim(),
-        [WEBSITE_CONTENT_STORAGE_KEY]: websiteContentInput.value.trim(),
-        [USER_NAME_STORAGE_KEY]: userNameInput.value.trim(),
-        [USER_EMAIL_STORAGE_KEY]: userEmailInput.value.trim(),
-        [USER_PASSWORD_STORAGE_KEY]: userPasswordInput.value.trim()
-      },
+      getSettingsPayloadFromInputs(),
       () => {
         if (chrome.runtime.lastError) {
           console.error('保存设置失败：', chrome.runtime.lastError);
@@ -490,25 +570,11 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
           }
 
-          const toSave = {};
-          IMPORT_COMPAT_STORAGE_KEYS.forEach((key) => {
-            if (importedData[key] !== undefined) {
-              toSave[key] = importedData[key];
-            }
-          });
-
-          if (toSave[WEBSITE_URL_STORAGE_KEY] === undefined) {
-            const legacyWebsiteUrl = getLegacyWebsiteUrl(importedData);
-            if (legacyWebsiteUrl) {
-              toSave[WEBSITE_URL_STORAGE_KEY] = legacyWebsiteUrl;
-            }
-          }
-
-          if (toSave[WEBSITE_CONTENT_STORAGE_KEY] === undefined) {
-            const legacyWebsiteContent = getLegacyWebsiteContent(importedData);
-            if (legacyWebsiteContent) {
-              toSave[WEBSITE_CONTENT_STORAGE_KEY] = legacyWebsiteContent;
-            }
+          const toSave = buildImportPayload(importedData);
+          applySettingsToForm(toSave);
+          if (!validateRequiredSettings()) {
+            showImportExportStatus('导入失败：配置缺少网站链接、网站内容、姓名或邮箱。', true);
+            return;
           }
 
           chrome.storage.sync.set(toSave, () => {
@@ -516,7 +582,8 @@ document.addEventListener('DOMContentLoaded', () => {
               showImportExportStatus('导入失败：' + chrome.runtime.lastError.message, true);
               return;
             }
-            showImportExportStatus('配置已导入！页面将自动刷新...', false);
+            showStatus(settingsStatusEl, '已保存');
+            showImportExportStatus('配置已导入并保存！页面将自动刷新...', false);
             setTimeout(() => {
               location.reload();
             }, 1500);

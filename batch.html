@@ -465,13 +465,15 @@
 
       .stats-table-wrap {
         max-height: 320px;
-        overflow-y: auto;
+        overflow: auto;
       }
 
       .stats-table {
-        width: 100%;
+        width: max-content;
+        min-width: 100%;
         border-collapse: collapse;
         font-size: 12px;
+        table-layout: fixed;
       }
 
       .stats-table th {
@@ -835,6 +837,15 @@
         </div>
         <div class="stats-table-wrap" id="statsTableWrap">
           <table class="stats-table">
+            <colgroup>
+              <col style="width: 44px" />
+              <col style="width: 190px" />
+              <col style="width: 92px" />
+              <col style="width: 210px" />
+              <col style="width: 260px" />
+              <col style="width: 72px" />
+              <col style="width: 72px" />
+            </colgroup>
             <thead>
               <tr>
                 <th>#</th>
